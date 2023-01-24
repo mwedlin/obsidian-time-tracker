@@ -362,7 +362,12 @@ function addEditableTableRow(tracker: Tracker, entry: Entry, table: HTMLTableEle
     nameBox.inputEl.hidden = true;
 
     // row.createEl("td", { text: entry.startTime ? formatTimestamp(entry.startTime, settings) : "" });
-    let startTimeEntry = formatTimestamp(entry.startTime, settings);
+    let startTimeEntry;
+    if (entry.startTime) {
+        startTimeEntry = formatTimestamp(entry.startTime, settings);
+    } else {
+        startTimeEntry = "";
+    };
     let startTime = row.createEl("td");
     let startPar = startTime.createEl("span", { text: startTimeEntry });
     startPar.style.marginLeft = `${indent}em`;
@@ -371,7 +376,12 @@ function addEditableTableRow(tracker: Tracker, entry: Entry, table: HTMLTableEle
 
 
     // row.createEl("td", { text: entry.endTime ? formatTimestamp(entry.endTime, settings) : "" });
-    let endTimeEntry = formatTimestamp(entry.endTime, settings);
+    let endTimeEntry;
+    if (entry.endTime) {
+        endTimeEntry = formatTimestamp(entry.endTime, settings);
+    } else {
+        endTimeEntry = "";
+    }
     let endTime = row.createEl("td");
     let endPar = endTime.createEl("span", { text: endTimeEntry });
     endPar.style.marginLeft = `${indent}em`;
