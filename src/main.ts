@@ -2,6 +2,8 @@ import { Plugin } from "obsidian";
 import { defaultSettings, TimeTrackerSettings } from "./settings";
 import { TimeTrackerSettingsTab } from "./settings-tab";
 import { displayTracker, loadTracker } from "./tracker";
+import { fileSection, readAll, stopAll } from "./files"
+import { BlockList } from "net";
 
 export default class SimpleTimeTrackerPlugin extends Plugin {
 
@@ -23,6 +25,19 @@ export default class SimpleTimeTrackerPlugin extends Plugin {
 			name: `Insert Time Tracker`,
 			editorCallback: (e, _) => {
 				e.replaceSelection("```time-tracker\n```\n");
+			}
+		});
+
+		this.addCommand({
+			id: `debug`,
+			name: `Debug files`,
+			editorCallback: async (e, _) => {
+				var allblocks = await readAll();
+				await stopAll();
+				var i: number;
+				for (i = 0; i<allblocks.length; i++) {
+					console.log("File: " + allblocks[i].file.path + ", Start: " + allblocks[i].startPos + ", Projekt: " + allblocks[i].tracker.project);
+				}
 			}
 		});
 	}

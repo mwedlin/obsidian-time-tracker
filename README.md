@@ -1,5 +1,5 @@
 # Time Tracker
-Time Tracker plugin for Obsidian.
+Time Tracker plugin for Obsidian. It started as a clone of Super Simple Time Tracker (Thank you Ellpeck, great program), but has been extended to have all the bells and whistles I needed to track time spent on my own projects.
 
 # 🤔 Usage
 Time is tracked in Clients/Projects and tasks.
