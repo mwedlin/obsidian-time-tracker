@@ -35,9 +35,9 @@ export default class SimpleTimeTrackerPlugin extends Plugin {
 				var allblocks = await readAll();
 				await stopAll();
 				var i: number;
-				for (i = 0; i<allblocks.length; i++) {
-					console.log("File: " + allblocks[i].file.path + ", Start: " + allblocks[i].startPos + ", Projekt: " + allblocks[i].tracker.project);
-				}
+				// for (i = 0; i<allblocks.length; i++) {
+				// 	console.log("File: " + allblocks[i].file.path + ", Start: " + allblocks[i].startPos + ", Projekt: " + allblocks[i].tracker.project);
+				// }
 			}
 		});
 	}

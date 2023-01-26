@@ -214,7 +214,7 @@ function startNewEntry(tracker: Tracker, name: string, project: string, client: 
     tracker.entries.push(entry);
 };
 
-function endRunningEntry(tracker: Tracker): void {
+export function endRunningEntry(tracker: Tracker): void {
     let entry = getRunningEntry(tracker.entries);
     entry.endTime = moment().unix();
 }
@@ -240,7 +240,7 @@ function removeEntry(entries: Entry[], toRemove: Entry): boolean {
     return false;
 }
 
-function isRunning(tracker: Tracker): boolean {
+export function isRunning(tracker: Tracker): boolean {
     return !!getRunningEntry(tracker.entries);
 }
 
@@ -425,10 +425,13 @@ function addEditableTableRow(tracker: Tracker, entry: Entry, table: HTMLTableEle
                     console.log("Value: " + startBox.getValue());
                     console.log("Parsed: ", nldatesPlugin.parse(startBox.getValue()).moment);
                     entry.startTime = nldatesPlugin.parse(startBox.getValue()).moment.unix();
-                //     entry.startPar = startBox.getValue();
-                //     namePar.setText(entry.startTime);
-                //     await saveTracker(tracker, this.app, getSectionInfo());
                 }
+                if (endBox.getValue()) {
+                    console.log("Value: " + endBox.getValue());
+                    console.log("Parsed: ", nldatesPlugin.parse(endBox.getValue()).moment);
+                    entry.endTime = nldatesPlugin.parse(endBox.getValue()).moment.unix();
+                }
+                
                 await saveTracker(tracker, this.app, getSectionInfo());
             } else {
                 namePar.hidden = true;
