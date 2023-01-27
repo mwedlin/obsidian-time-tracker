@@ -29,6 +29,14 @@ export default class SimpleTimeTrackerPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: `stop`,
+			name: `Stop all timers`,
+			editorCallback: (e, _) => {
+				stopAll();
+			}
+		});
+
+		this.addCommand({
 			id: `debug`,
 			name: `Debug files`,
 			editorCallback: async (e, _) => {
