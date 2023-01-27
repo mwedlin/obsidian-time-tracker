@@ -1,4 +1,4 @@
-import { moment, App, MarkdownSectionInformation, ButtonComponent, TextComponent, obsidianApp } from "obsidian";
+import { moment, App, MarkdownSectionInformation, ButtonComponent, TextComponent, obsidianApp, MomentFormatComponent } from "obsidian";
 import { TimeTrackerSettings } from "./settings";
 import { stopAll } from "./files"
 // const nldatesPlugin = obsidianApp.plugins.getPlugin("nldates-obsidian");
@@ -18,17 +18,6 @@ export interface Entry {
     subEntries: Entry[];
 }
 
-export async function testChrono(): void {
-    let obsidianApp = this.app;
-    let nldatesPlugin = obsidianApp.plugins.getPlugin('nldates-obsidian'); // Get the Natural Language Dates plugin.    chrono.parse('An appointment on Sep 12-13');
-    const nextYear = nldatesPlugin.parseDate("next year");
-
-    console.log(nextYear.moment.format("YYYY")); // This should return 2021
-    console.log(nextYear.moment.fromNow()); // "In two months"
-    
-    const thisEvening = nldatesPlugin.parseDate("today at 21:00");
-    console.log(thisEvening.moment.add(1, "hour")); // This would change the Moment to 22:00
-}
 export async function saveTracker(tracker: Tracker, app: App, section: MarkdownSectionInformation): Promise<void> {
     let file = app.workspace.getActiveFile();
     if (!file)
@@ -63,7 +52,6 @@ export function loadTracker(json: string): Tracker {
 export function displayTracker(tracker: Tracker, element: HTMLElement, getSectionInfo: () => MarkdownSectionInformation, settings: TimeTrackerSettings): void {
     // add start/stop controls
 
-    testChrono();
     console.log("Startar displayTracker");
 
     if (tracker.dispType == undefined) {
@@ -310,6 +298,23 @@ function formatDuration(totalTime: number): string {
     return ret;
 }
 
+// Parse a date
+function parseDate(dt: String, format: String): Moment {
+    let nldatesPlugin = this.app.plugins.getPlugin('nldates-obsidian'); // Get the Natural Language Dates plugin.    chrono.parse('An appointment on Sep 12-13');
+    var res: Moment;
+
+    console.log("Value to parse: " + dt);
+
+    console.log("Trying moment with format '" + format + "'")
+    res = moment(dt, format, true); // First try strict mode with the format from settings
+    console.log("Result was: " + res.format(format));
+    if (!res.isValid()) {  // Strict parsing failed.
+        res = nldatesPlugin.parse(dt).moment; // Be more relaxed if possible
+        console.log("Parsed with nldates: " + res);
+    }
+    return res;
+}
+
 function createMarkdownTable(tracker: Tracker, settings: TimeTrackerSettings): string {
     let table = [["task", "Start time", "End time", "Duration"]];
     for (let entry of tracker.entries)
@@ -409,8 +414,8 @@ function addEditableTableRow(tracker: Tracker, entry: Entry, table: HTMLTableEle
         .setTooltip("Edit")
         .setIcon("lucide-pencil")
         .onClick(async () => {
-            let obsidianApp = this.app;
-            let nldatesPlugin = obsidianApp.plugins.getPlugin('nldates-obsidian'); // Get the Natural Language Dates plugin.    chrono.parse('An appointment on Sep 12-13');
+            var format = settings.timestampFormat;
+            console.log("Format: " + format)
         
             if (namePar.hidden) {
                 namePar.hidden = false;
@@ -425,14 +430,10 @@ function addEditableTableRow(tracker: Tracker, entry: Entry, table: HTMLTableEle
                     namePar.setText(entry.name);
                 }
                 if (startBox.getValue()) {
-                    console.log("Value: " + startBox.getValue());
-                    console.log("Parsed: ", nldatesPlugin.parse(startBox.getValue()).moment);
-                    entry.startTime = nldatesPlugin.parse(startBox.getValue()).moment.unix();
+                    entry.startTime = await parseDate(startBox.getValue(), format).unix();
                 }
                 if (endBox.getValue()) {
-                    console.log("Value: " + endBox.getValue());
-                    console.log("Parsed: ", nldatesPlugin.parse(endBox.getValue()).moment);
-                    entry.endTime = nldatesPlugin.parse(endBox.getValue()).moment.unix();
+                    entry.endTime = await parseDate(endBox.getValue(), format).unix();
                 }
                 
                 await saveTracker(tracker, this.app, getSectionInfo());
