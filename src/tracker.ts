@@ -1,5 +1,6 @@
 import { moment, App, MarkdownSectionInformation, ButtonComponent, TextComponent, obsidianApp } from "obsidian";
 import { TimeTrackerSettings } from "./settings";
+import { stopAll } from "./files"
 // const nldatesPlugin = obsidianApp.plugins.getPlugin("nldates-obsidian");
 
 export interface Tracker {
@@ -98,6 +99,7 @@ export function displayTrackerDefault(tracker: Tracker, element: HTMLElement, ge
             if (running) {
                 endRunningEntry(tracker);
             } else {
+                await stopAll();
                 startNewEntry(tracker, newTaskNameBox.getValue(), newProjectNameBox.getValue(), newClientNameBox.getValue());
             }
             await saveTracker(tracker, this.app, getSectionInfo());
@@ -397,6 +399,7 @@ function addEditableTableRow(tracker: Tracker, entry: Entry, table: HTMLTableEle
             .setIcon(`lucide-play`)
             .setTooltip("Continue")
             .onClick(async () => {
+                await stopAll();
                 startSubEntry(entry, newTaskNameBox.getValue());
                 await saveTracker(tracker, this.app, getSectionInfo());
             });
