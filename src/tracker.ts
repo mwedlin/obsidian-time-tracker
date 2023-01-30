@@ -299,19 +299,19 @@ function formatDuration(totalTime: number): string {
 }
 
 // Parse a date
-function parseDate(dt: String, format: String): Moment {
+export function parseDate(dt: String, format: String): Moment {
     let nldatesPlugin = this.app.plugins.getPlugin('nldates-obsidian'); // Get the Natural Language Dates plugin.    chrono.parse('An appointment on Sep 12-13');
     var res: Moment;
 
-    console.log("Value to parse: " + dt);
+    // console.log("Value to parse: " + dt);
 
-    console.log("Trying moment with format '" + format + "'")
+    // console.log("Trying moment with format '" + format + "'")
     res = moment(dt, format, true); // First try strict mode with the format from settings
-    console.log("Result was: " + res.format(format));
+    // console.log("Result was: " + res.format(format));
     if (!res.isValid()) {  // Strict parsing failed.
         res = nldatesPlugin.parse(dt).moment; // Be more relaxed if possible
-        console.log("Parsed with nldates: " + res);
-    }
+        // console.log("Parsed with nldates: " + res);
+    };
     return res;
 }
 

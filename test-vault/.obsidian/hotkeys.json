@@ -7,5 +7,14 @@
       ],
       "key": "R"
     }
+  ],
+  "time-tracker:debug": [
+    {
+      "modifiers": [
+        "Mod",
+        "Shift"
+      ],
+      "key": " "
+    }
   ]
 }
