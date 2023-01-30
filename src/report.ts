@@ -1,6 +1,7 @@
 import { App, Modal, ButtonComponent, TextComponent } from "obsidian";
 import { setUncaughtExceptionCaptureCallback } from "process";
 import { TimeTrackerSettingsTab } from "./settings-tab";
+import { TimeTrackerSettings } from "./settings";
 import { parseDate, Entry } from "./tracker";
 import { FileSection, readAll } from "./files";
 import * as moment from "moment";
@@ -17,7 +18,7 @@ async function createMarkdownTable(entries: Entry[]): string {
     for (let r = 0; r < table.length; r++) {
         // add separators after first row
         if (r == 1)
-            ret += Array.from(Array(4).keys()).map(i => "-".repeat(widths[i])).join(" | ") + "\n";
+            ret += "---|---|---|---\n";
 
         let row: string[] = [];
         for (let i = 0; i < 4; i++)
@@ -32,7 +33,7 @@ function createTableSection(entry: Entry): string[][] {
         entry.name,
         entry.startTime ? moment.unix(entry.startTime).format("YYYY-MM-DD HH:mm:ss") : "",
         entry.endTime ? moment.unix(entry.endTime).format("YYYY-MM-DD HH:mm:ss") : "",
-        (entry.endTime - entry.StartTime) / 3600.0
+        ((entry.endTime - entry.startTime)/3600).toLocaleString(undefined, { maximumFractionDigits: 2})
     ]];
    
     return ret;
@@ -43,6 +44,14 @@ function isWithin(trStart, trEnd, durStart, durEnd): boolean {
     if (trEnd < durStart) return false; // Before duration
     if (trStart > durEnd) return false; // After duration
     return true;
+}
+
+// Construct a name from project and client
+function toName(project: String, client: String): String {
+    if (project && client) return project + "/" + client;
+    if (project) return project;
+    if (client) return client;
+    return "(no project)";
 }
 
 // Make a list of all time entries between the to entries.
@@ -65,8 +74,7 @@ async function allTracks(start: number, end: number): Entry[] {
                         let thisEnd = allEntries[i].tracker.entries[j].subEntries[k].endTime;
                         if (thisStart < start) thisStart = start;
                         if (thisEnd > end) thisEnd = end;
-                        let name = allEntries[i].tracker.project + "/" +
-                                   allEntries[i].tracker.client;
+                        let name = toName(allEntries[i].tracker.project, allEntries[i].tracker.client);
                         let e:Entry = {name: name, startTime: thisStart,
                                        endTime: thisEnd, subEntries: undefined };
                         ret.push(e);
@@ -84,8 +92,7 @@ async function allTracks(start: number, end: number): Entry[] {
                     let thisEnd = allEntries[i].tracker.entries[j].endTime;
                     if (thisStart < start) thisStart = start;
                     if (thisEnd > end) thisEnd = end;
-                    let name = allEntries[i].tracker.project + "/" +
-                               allEntries[i].tracker.client;
+                    let name = toName(allEntries[i].tracker.project, allEntries[i].tracker.client);
                     let e:Entry = {name: name, startTime: thisStart,
                                    endTime: thisEnd, subEntries: undefined };
                     ret.push(e);
@@ -106,6 +113,9 @@ export class ReportModal extends Modal {
   }
 
   onOpen() {
+    const settings = app.settings;
+    console.log("app: " + Object.keys(app));
+    
     const { contentEl } = this;
     let hdr = contentEl.createEl("H2").setText("Report as table")
     let tbl = contentEl.createEl("table", { cls: "time-tracker-table" });
