@@ -6,6 +6,16 @@ import { parseDate, Entry } from "./tracker";
 import { FileSection, readAll } from "./files";
 import * as moment from "moment";
 
+function findProjects(entries: Entry[]):String[] {
+    let str: String[] = [];
+
+    for (i=0; i<entries.length; i++) {
+        const found = str.find(element => element == entries[i].name);
+        if (!found) str.push(entries[i].name);
+    };
+    return str;
+}
+
 async function createMarkdownTable(entries: Entry[]): string {
     console.log("Table with " + entries.length + " entries.")
     let table = [["Project", "Start time", "End time", "Duration"]];
@@ -173,9 +183,9 @@ export class ReportModal extends Modal {
                             endTime + "(" + moment.unix(endTime).format("L LTS") + ")"
                             );
                 let all = await allTracks(startTime, endTime);
+                console.log("Projects: ", await findProjects(all));
                 navigator.clipboard.writeText(await createMarkdownTable(all));
             };
-            
         });
   }
 

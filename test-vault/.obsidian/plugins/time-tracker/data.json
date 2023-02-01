@@ -1,4 +1,4 @@
 {
-  "timestampFormat": "YY-MM-DD HH:mm:ss",
+  "timestampFormat": "YYYY-MM-DD HH:mm:ss",
   "csvDelimiter": ","
 }
