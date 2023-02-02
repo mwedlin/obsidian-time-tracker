@@ -1,4 +1,4 @@
-import { App, Modal, ButtonComponent, TextComponent } from "obsidian";
+import { App, Modal, ButtonComponent, TextComponent, MomentFormatComponent } from "obsidian";
 import { setUncaughtExceptionCaptureCallback } from "process";
 import { TimeTrackerSettingsTab } from "./settings-tab";
 import { TimeTrackerSettings } from "./settings";
@@ -6,6 +6,7 @@ import { parseDate, Entry } from "./tracker";
 import { FileSection, readAll } from "./files";
 import * as moment from "moment";
 
+// Return a list of all the projects in 
 function findProjects(entries: Entry[]):String[] {
     let str: String[] = [];
 
@@ -13,11 +14,90 @@ function findProjects(entries: Entry[]):String[] {
         const found = str.find(element => element == entries[i].name);
         if (!found) str.push(entries[i].name);
     };
-    return str;
+    return str.sort();
 }
 
-async function createMarkdownTable(entries: Entry[]): string {
+// Return an array of moments for days in the interval
+function findDays(start, end): Moment[] {
+    
+    let r: Moment[] = [];
+    for (let m: Moment = moment.unix(start).hours(0).minutes(0).seconds(0); m.clone().add(1, "days").unix() < end; m.add(1, "days")) {
+        r.push(m.clone());
+    }
+    return r;
+}
+
+// Return a string with the number hours worked on a project on a specific day.
+function daySum(project: String, day: Moment, entries: Entry[]) {
+    let sum = 0; // Seconds
+    let dayStart = day.unix();
+    let dayEnd = day.clone().add(1, "days").unix();
+
+    for (let i=0; i < entries.length; i++) {
+        if (project == entries[i].name) {
+            if (isWithin(entries[i].startTime, entries[i].endTime, dayStart, dayEnd)) {
+                let start = entries[i].startTime;
+                let end = entries[i].endTime;
+                if (start < dayStart) start = dayStart;
+                if (end > dayEnd) end = dayEnd;
+                sum += end - start;
+            }
+        }
+    }
+    return (sum/3600).toLocaleString(undefined, { maximumFractionDigits: 2});
+}
+
+// Sum all times for a project.
+function sumProject(project: String, entries: Entry[]) {
+    let sum = 0; // Seconds
+
+    for (let i=0; i < entries.length; i++) {
+        if (project == entries[i].name) {
+                sum += entries[i].endTime - entries[i].startTime;
+        }
+    }
+    return (sum/3600).toLocaleString(undefined, { maximumFractionDigits: 2});
+}
+
+async function createMarkdownTable(start, end, entries: Entry[]): string {
     console.log("Table with " + entries.length + " entries.")
+    let days = await findDays(start, end);
+    let projects = await await findProjects(entries);
+
+    // let table = [["Project", "Start time", "End time", "Duration"]];
+    // for (let entry of entries)
+    //    await table.push(...createTableSection(entry));
+
+    let ret = "Project |";
+    // calculate the width every column needs to look neat when monospaced
+    // let widths = Array.from(Array(4).keys()).map(i => Math.max(...table.map(a => a[i].length)));
+    for (let i = 0; i < days.length; i++) { // First row
+        ret += days[i].format(" dddd<br>YYYY-MM-DD |");
+    };
+    ret += " Total\n";
+    for (let i = 0; i < days.length + 1; i++) { // add separators after first row
+        ret += "---|";
+    };
+    ret += "---\n";
+    for (let i = 0; i < projects.length; i++) { // Project sums
+        ret += projects[i] + " |";
+        for (let j=0; j<days.length; j++) {
+            ret += daySum(projects[i], days[j], entries) + " |";
+        };
+        ret += sumProject(projects[i], entries) + "\n";
+    };
+    ret += "Total: |";
+    for (i=0; i<days.length; i++) { // Sum up the days.
+        ret += "(totsum)" + " |";
+    };
+    ret += " - \n";
+
+    return ret;
+}
+
+async function createListTable(entries: Entry[]): string {
+    console.log("Table with " + entries.length + " entries.");
+
     let table = [["Project", "Start time", "End time", "Duration"]];
     for (let entry of entries)
         await table.push(...createTableSection(entry));
@@ -183,8 +263,13 @@ export class ReportModal extends Modal {
                             endTime + "(" + moment.unix(endTime).format("L LTS") + ")"
                             );
                 let all = await allTracks(startTime, endTime);
+                let days = await findDays(startTime, endTime, all);
                 console.log("Projects: ", await findProjects(all));
-                navigator.clipboard.writeText(await createMarkdownTable(all));
+                console.log("Days: ")
+                for (i=0; i<days.length; i++) {
+                    console.log("  ", days[i].format("YYYY-MM-DD HH:mm:ss, dddd"));
+                }
+                navigator.clipboard.writeText(await createMarkdownTable(startTime, endTime, all));
             };
         });
   }
