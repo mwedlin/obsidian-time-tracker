@@ -200,17 +200,18 @@ async function allTracks(start: number, end: number): Entry[] {
 // Return a project time list in clipboard
 export class ReportModal extends Modal {
 
+    settings: TimeTrackerSettings;
     onSubmit: (text: String) => void;
 
-    constructor(app: App, onSubmit: (text: String) => void) {
+    constructor(app: App, settings: TimeTrackerSettings, onSubmit: (text: String) => void) {
         super(app);
+        this.settings = settings;
         this.onSubmit = onSubmit;
     }
 
     onOpen() {
-        const settings = app.settings;
         // console.log("app: " + Object.keys(this.app));
-        // console.log("e: " + Object.keys(e));
+        console.log("Settings: " + Object.keys(this.settings));
     
         const { contentEl } = this;
         let hdr = contentEl.createEl("H2").setText("Report as table")
@@ -239,17 +240,17 @@ export class ReportModal extends Modal {
         new ButtonComponent(buttons)
             .setButtonText("Check dates")
             .onClick(() => {
-                var format = "YYYY-MM-DD"
+                const format = this.settings.timestampFormat;
 
                 let startDate = parseDate(newStartNameBox.getValue(), format);
                 let endDate = parseDate(newEndNameBox.getValue(), format);
                 if (startDate.isValid()) {
-                    console.log("Start OK: " + startDate.format("YYYY-MM-DD"));
-                    newStartNameBox.setValue(startDate.format("YYYY-MM-DD"));
+                    console.log("Start OK: " + startDate.format(format));
+                    newStartNameBox.setValue(startDate.format(format));
                 };
                 if (endDate.isValid()) {
-                    console.log("End OK: " + endDate.format("YYYY-MM-DD"));
-                    newEndNameBox.setValue(endDate.format("YYYY-MM-DD"));
+                    console.log("End OK: " + endDate.format(format));
+                    newEndNameBox.setValue(endDate.format(format));
                 };
                 // navigator.clipboard.writeText("Copied text");
             });
@@ -257,7 +258,7 @@ export class ReportModal extends Modal {
         new ButtonComponent(buttons)
             .setButtonText("Append table at cursor")
             .onClick(async () => {
-                var format = "YYYY-MM-DD"
+                const format = this.settings.timestampFormat;
 
                 let startDate = parseDate(newStartNameBox.getValue(), format);
                 let endDate = parseDate(newEndNameBox.getValue(), format);
@@ -265,8 +266,8 @@ export class ReportModal extends Modal {
                     let startTime = startDate.startOf("day").unix(); // First second of date
                     let endTime = endDate.endOf("day").unix(); // Last second of date
                     console.log("Intervall OK: " + startTime +
-                            "(" + moment.unix(startTime).format(format + " HH.mm.ss") + ") -- " +
-                            endTime + "(" + moment.unix(endTime).format(format + " HH.mm.ss") + ")"
+                            "(" + moment.unix(startTime).format(format) + ") -- " +
+                            endTime + "(" + moment.unix(endTime).format(format) + ")"
                             );
                     let all = await allTracks(startTime, endTime);
                     let days = await findDays(startTime, endTime, all);

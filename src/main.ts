@@ -47,7 +47,7 @@ export default class TimeTrackerPlugin extends Plugin {
 					editor.replaceSelection(text);
 				};
 
-				new ReportModal(this.app, onSubmit).open();
+				new ReportModal(this.app, this.settings, onSubmit).open();
 			}
 		});
 
