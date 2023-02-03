@@ -40,8 +40,14 @@ export default class TimeTrackerPlugin extends Plugin {
 		this.addCommand({
 			id: `Report`,
 			name: `Report times`,
-			editorCallback: async (e, _) => {
-				new ReportModal(this.app).open();
+			editorCallback: async (editor: Editor) => {
+				// const selText = editor.getSelection();
+
+				const onSubmit = (text: String) => {
+					editor.replaceSelection(text);
+				};
+
+				new ReportModal(this.app, onSubmit).open();
 			}
 		});
 

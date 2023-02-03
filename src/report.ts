@@ -199,86 +199,93 @@ async function allTracks(start: number, end: number): Entry[] {
 }
 // Return a project time list in clipboard
 export class ReportModal extends Modal {
-  constructor(app: App) {
-    super(app);
-  }
 
-  onOpen() {
-    const settings = app.settings;
-    console.log("app: " + Object.keys(this.app));
-    // console.log("e: " + Object.keys(e));
+    onSubmit: (text: String) => void;
+
+    constructor(app: App, onSubmit: (text: String) => void) {
+        super(app);
+        this.onSubmit = onSubmit;
+    }
+
+    onOpen() {
+        const settings = app.settings;
+        // console.log("app: " + Object.keys(this.app));
+        // console.log("e: " + Object.keys(e));
     
-    const { contentEl } = this;
-    let hdr = contentEl.createEl("H2").setText("Report as table")
-    let tbl = contentEl.createEl("table", { cls: "time-tracker-table" });
-    let row1 = tbl.createEl("tr");
+        const { contentEl } = this;
+        let hdr = contentEl.createEl("H2").setText("Report as table")
+        let tbl = contentEl.createEl("table", { cls: "time-tracker-table" });
+        let row1 = tbl.createEl("tr");
  
-    // Start time
-    let td1 = row1.createEl("td");
-    let newStartDiv = td1.createEl("div", {cls: "time-tracker-txt"})
-    let newStart = newStartDiv.createEl("span", { cls: "time-tracker-txt" });
-    let newStartNameBox = new TextComponent(newStart)
-        .setPlaceholder("From time");
-    newStartDiv.createEl("span", { text: "From" });
+        // Start time
+        let td1 = row1.createEl("td");
+        let newStartDiv = td1.createEl("div", {cls: "time-tracker-txt"})
+        let newStart = newStartDiv.createEl("span", { cls: "time-tracker-txt" });
+        let newStartNameBox = new TextComponent(newStart)
+            .setPlaceholder("From time");
+        newStartDiv.createEl("span", { text: "From" });
 
-    // End time
-    let td2 = row1.createEl("td");
-    let newEndDiv = td2.createEl("div", {cls: "time-tracker-txt"})
-    let newEnd = newEndDiv.createEl("span", { cls: "time-tracker-txt" });
-    let newEndNameBox = new TextComponent(newEnd)
-        .setPlaceholder("To time");
-    newEndDiv.createEl("span", { text: "To" });
+        // End time
+        let td2 = row1.createEl("td");
+        let newEndDiv = td2.createEl("div", {cls: "time-tracker-txt"})
+        let newEnd = newEndDiv.createEl("span", { cls: "time-tracker-txt" });
+        let newEndNameBox = new TextComponent(newEnd)
+            .setPlaceholder("To time");
+        newEndDiv.createEl("span", { text: "To" });
 
-    // add Calculate buttons
-    let buttons = contentEl.createEl("div", { cls: "time-tracker-bottom" });
-
-    new ButtonComponent(buttons)
-        .setButtonText("Check dates")
-        .onClick(() => {
-            var format = "YYYY-MM-DD"
-
-            let startDate = parseDate(newStartNameBox.getValue(), format);
-            let endDate = parseDate(newEndNameBox.getValue(), format);
-            if (startDate.isValid()) {
-                console.log("Start OK: " + startDate.format("YYYY-MM-DD"));
-                newStartNameBox.setValue(startDate.format("YYYY-MM-DD"));
-            };
-            if (endDate.isValid()) {
-                console.log("End OK: " + endDate.format("YYYY-MM-DD"));
-                newEndNameBox.setValue(endDate.format("YYYY-MM-DD"));
-            };
-            navigator.clipboard.writeText("Copied text");
-        });
+        // add Calculate buttons
+        let buttons = contentEl.createEl("div", { cls: "time-tracker-bottom" });
 
         new ButtonComponent(buttons)
-        .setButtonText("Append table at cursor")
-        .onClick(async () => {
-            var format = "YYYY-MM-DD"
+            .setButtonText("Check dates")
+            .onClick(() => {
+                var format = "YYYY-MM-DD"
 
-            let startDate = parseDate(newStartNameBox.getValue(), format);
-            let endDate = parseDate(newEndNameBox.getValue(), format);
-            if (startDate.isValid() && endDate.isValid()) {
-                let startTime = startDate.startOf("day").unix(); // First second of date
-                let endTime = endDate.endOf("day").unix(); // Last second of date
-                console.log("Intervall OK: " + startTime +
+                let startDate = parseDate(newStartNameBox.getValue(), format);
+                let endDate = parseDate(newEndNameBox.getValue(), format);
+                if (startDate.isValid()) {
+                    console.log("Start OK: " + startDate.format("YYYY-MM-DD"));
+                    newStartNameBox.setValue(startDate.format("YYYY-MM-DD"));
+                };
+                if (endDate.isValid()) {
+                    console.log("End OK: " + endDate.format("YYYY-MM-DD"));
+                    newEndNameBox.setValue(endDate.format("YYYY-MM-DD"));
+                };
+                // navigator.clipboard.writeText("Copied text");
+            });
+
+        new ButtonComponent(buttons)
+            .setButtonText("Append table at cursor")
+            .onClick(async () => {
+                var format = "YYYY-MM-DD"
+
+                let startDate = parseDate(newStartNameBox.getValue(), format);
+                let endDate = parseDate(newEndNameBox.getValue(), format);
+                if (startDate.isValid() && endDate.isValid()) {
+                    let startTime = startDate.startOf("day").unix(); // First second of date
+                    let endTime = endDate.endOf("day").unix(); // Last second of date
+                    console.log("Intervall OK: " + startTime +
                             "(" + moment.unix(startTime).format(format + " HH.mm.ss") + ") -- " +
                             endTime + "(" + moment.unix(endTime).format(format + " HH.mm.ss") + ")"
                             );
-                let all = await allTracks(startTime, endTime);
-                let days = await findDays(startTime, endTime, all);
-                console.log("Projects: ", await findProjects(all));
-                console.log("Days: ")
-                for (i=0; i<days.length; i++) {
-                    console.log("  ", days[i].format("YYYY-MM-DD HH:mm:ss, dddd"));
-                }
-                navigator.clipboard.writeText(await createMarkdownTable(startTime, endTime, all));
-            };
-        });
-  }
+                    let all = await allTracks(startTime, endTime);
+                    let days = await findDays(startTime, endTime, all);
+                    console.log("Projects: ", await findProjects(all));
+                    console.log("Days: ")
+                    for (i=0; i<days.length; i++) {
+                        console.log("  ", days[i].format("YYYY-MM-DD HH:mm:ss, dddd"));
+                    }
+                    // navigator.clipboard.writeText(await createMarkdownTable(startTime, endTime, all));
+                    const text = await createMarkdownTable(startTime, endTime, all);
+                    this.close();
+                    this.onSubmit(text);
+                };
+            });
+    };
 
-  onClose() {
-    let { contentEl } = this;
-    contentEl.empty();
-  }
+    onClose() {
+        let { contentEl } = this;
+        contentEl.empty();
+    };
 }
 
