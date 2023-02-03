@@ -21,8 +21,12 @@ function findProjects(entries: Entry[]):String[] {
 function findDays(start, end): Moment[] {
     
     let r: Moment[] = [];
-    for (let m: Moment = moment.unix(start).hours(0).minutes(0).seconds(0); m.clone().add(1, "days").unix() < end; m.add(1, "days")) {
-        r.push(m.clone());
+    console.log("Days: " + moment.unix(start).format("YYYY-MM-DD HH.mm.ss") + "(" + start + ") -> " + moment.unix(end).format("YYYY-MM-DD HH.mm.ss") + " (" + end + ")");
+    for (let i = start; i <= end; i += (3600 * 24)) {
+        const m = moment.unix(i).startOf("days");
+        const nexti: number = i+(3600 * 24);
+        console.log("    i: " + i + " (" + m.format("YYYY-MM-DD HH.mm.ss") + "), next: " + nexti)
+        r.push(m);
     }
     return r;
 }
@@ -31,7 +35,7 @@ function findDays(start, end): Moment[] {
 function daySum(project: String, day: Moment, entries: Entry[]) {
     let sum = 0; // Seconds
     let dayStart = day.unix();
-    let dayEnd = day.clone().add(1, "days").unix();
+    let dayEnd = day.clone().endOf("days").unix();
 
     for (let i=0; i < entries.length; i++) {
         if (project == entries[i].name) {
@@ -40,6 +44,7 @@ function daySum(project: String, day: Moment, entries: Entry[]) {
                 let end = entries[i].endTime;
                 if (start < dayStart) start = dayStart;
                 if (end > dayEnd) end = dayEnd;
+
                 sum += end - start;
             }
         }
@@ -51,8 +56,11 @@ function daySum(project: String, day: Moment, entries: Entry[]) {
 function sumProject(project: String, entries: Entry[]) {
     let sum = 0; // Seconds
 
+    console.log("Project: ", project);
     for (let i=0; i < entries.length; i++) {
         if (project == entries[i].name) {
+                console.log("    Adding " + moment.unix(entries[i].startTime).format("YYYY-MM-DD") + ": " +
+                ((entries[i].endTime - entries[i].startTime)/3600).toLocaleString(undefined, { maximumFractionDigits: 2}));
                 sum += entries[i].endTime - entries[i].startTime;
         }
     }
@@ -256,11 +264,11 @@ export class ReportModal extends Modal {
             let startDate = parseDate(newStartNameBox.getValue(), format);
             let endDate = parseDate(newEndNameBox.getValue(), format);
             if (startDate.isValid() && endDate.isValid()) {
-                let startTime = startDate.unix(); // First second of date
-                let endTime = endDate.unix() + (3600 * 24) - 1; // Last second of date
+                let startTime = startDate.startOf("day").unix(); // First second of date
+                let endTime = endDate.endOf("day").unix(); // Last second of date
                 console.log("Intervall OK: " + startTime +
-                            "(" + moment.unix(startTime).format("L LTS") + ") -- " +
-                            endTime + "(" + moment.unix(endTime).format("L LTS") + ")"
+                            "(" + moment.unix(startTime).format(format + " HH.mm.ss") + ") -- " +
+                            endTime + "(" + moment.unix(endTime).format(format + " HH.mm.ss") + ")"
                             );
                 let all = await allTracks(startTime, endTime);
                 let days = await findDays(startTime, endTime, all);

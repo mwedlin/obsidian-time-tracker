@@ -315,27 +315,27 @@ export function parseDate(dt: String, format: String): Moment {
     return res;
 }
 
-function createMarkdownTable(tracker: Tracker, settings: TimeTrackerSettings): string {
-    let table = [["task", "Start time", "End time", "Duration"]];
-    for (let entry of tracker.entries)
-        table.push(...createTableSection(entry, settings));
-    table.push(["**Total**", "", "", `**${formatDuration(getTotalDuration(tracker.entries))}**`]);
+// function createMarkdownTable(tracker: Tracker, settings: TimeTrackerSettings): string {
+//    let table = [["task", "Start time", "End time", "Duration"]];
+//    for (let entry of tracker.entries)
+//        table.push(...createTableSection(entry, settings));
+//    table.push(["**Total**", "", "", `**${formatDuration(getTotalDuration(tracker.entries))}**`]);
 
-    let ret = "";
+//    let ret = "";
     // calculate the width every column needs to look neat when monospaced
-    let widths = Array.from(Array(4).keys()).map(i => Math.max(...table.map(a => a[i].length)));
-    for (let r = 0; r < table.length; r++) {
+//    let widths = Array.from(Array(4).keys()).map(i => Math.max(...table.map(a => a[i].length)));
+//    for (let r = 0; r < table.length; r++) {
         // add separators after first row
-        if (r == 1)
-            ret += Array.from(Array(4).keys()).map(i => "-".repeat(widths[i])).join(" | ") + "\n";
+//        if (r == 1)
+//            ret += Array.from(Array(4).keys()).map(i => "-".repeat(widths[i])).join(" | ") + "\n";
 
-        let row: string[] = [];
-        for (let i = 0; i < 4; i++)
-            row.push(table[r][i].padEnd(widths[i], " "));
-        ret += row.join(" | ") + "\n";
-    }
-    return ret;
-}
+//        let row: string[] = [];
+//        for (let i = 0; i < 4; i++)
+//            row.push(table[r][i].padEnd(widths[i], " "));
+//        ret += row.join(" | ") + "\n";
+//    }
+//    return ret;
+//}
 
 function createCsv(tracker: Tracker, settings: TimeTrackerSettings): string {
     let ret = "";
