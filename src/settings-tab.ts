@@ -4,9 +4,9 @@ import { defaultSettings } from "./settings";
 
 export class TimeTrackerSettingsTab extends PluginSettingTab {
 
-    plugin: SimpleTimeTrackerPlugin;
+    plugin: TimeTrackerPlugin;
 
-    constructor(app: App, plugin: SimpleTimeTrackerPlugin) {
+    constructor(app: App, plugin: TimeTrackerPlugin) {
         super(app, plugin);
         this.plugin = plugin;
     }

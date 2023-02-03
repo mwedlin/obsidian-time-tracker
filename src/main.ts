@@ -6,7 +6,7 @@ import { fileSection, readAll, stopAll } from "./files"
 import { ReportModal } from "./report"
 import { BlockList } from "net";
 
-export default class SimpleTimeTrackerPlugin extends Plugin {
+export default class TimeTrackerPlugin extends Plugin {
 
 	settings: TimeTrackerSettings;
 
