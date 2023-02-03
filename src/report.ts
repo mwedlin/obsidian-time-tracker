@@ -32,14 +32,26 @@ function findDays(start, end): Moment[] {
 }
 
 // Return a string with the number hours worked on a project on a specific day.
+// If project is undefined, report a total sum of all projects this day.
+// If day = undefined, report time of all days in project.
 function daySum(project: String, day: Moment, entries: Entry[]) {
     let sum = 0; // Seconds
-    let dayStart = day.unix();
-    let dayEnd = day.clone().endOf("days").unix();
+    var doAll: Boolean;
+    var dayStart: Number;
+    var dayEnd: Number;
 
+    if (day == undefined) {
+        doAll = true;
+    } else {
+        doAll = false;
+        dayStart = day.unix();
+        dayEnd = day.clone().endOf("days").unix();
+    };
     for (let i=0; i < entries.length; i++) {
-        if (project == entries[i].name) {
-            if (isWithin(entries[i].startTime, entries[i].endTime, dayStart, dayEnd)) {
+        if (project == undefined || project == entries[i].name) {
+            if (doAll) {
+                sum += entries[i].endTime - entries[i].startTime;
+            } else if (isWithin(entries[i].startTime, entries[i].endTime, dayStart, dayEnd)) {
                 let start = entries[i].startTime;
                 let end = entries[i].endTime;
                 if (start < dayStart) start = dayStart;
@@ -53,19 +65,19 @@ function daySum(project: String, day: Moment, entries: Entry[]) {
 }
 
 // Sum all times for a project.
-function sumProject(project: String, entries: Entry[]) {
-    let sum = 0; // Seconds
+// function sumProject(project: String, entries: Entry[]) {
+//     let sum = 0; // Seconds
 
-    console.log("Project: ", project);
-    for (let i=0; i < entries.length; i++) {
-        if (project == entries[i].name) {
-                console.log("    Adding " + moment.unix(entries[i].startTime).format("YYYY-MM-DD") + ": " +
-                ((entries[i].endTime - entries[i].startTime)/3600).toLocaleString(undefined, { maximumFractionDigits: 2}));
-                sum += entries[i].endTime - entries[i].startTime;
-        }
-    }
-    return (sum/3600).toLocaleString(undefined, { maximumFractionDigits: 2});
-}
+//     console.log("Project: ", project);
+//     for (let i=0; i < entries.length; i++) {
+//         if (project == entries[i].name) {
+//                 console.log("    Adding " + moment.unix(entries[i].startTime).format("YYYY-MM-DD") + ": " +
+//                 ((entries[i].endTime - entries[i].startTime)/3600).toLocaleString(undefined, { maximumFractionDigits: 2}));
+//                 sum += entries[i].endTime - entries[i].startTime;
+//         }
+//     }
+//     return (sum/3600).toLocaleString(undefined, { maximumFractionDigits: 2});
+// }
 
 async function createMarkdownTable(start, end, entries: Entry[]): string {
     console.log("Table with " + entries.length + " entries.")
@@ -82,7 +94,7 @@ async function createMarkdownTable(start, end, entries: Entry[]): string {
     for (let i = 0; i < days.length; i++) { // First row
         ret += days[i].format(" dddd<br>YYYY-MM-DD |");
     };
-    ret += " Total\n";
+    ret += " **Total**\n";
     for (let i = 0; i < days.length + 1; i++) { // add separators after first row
         ret += "---|";
     };
@@ -92,13 +104,15 @@ async function createMarkdownTable(start, end, entries: Entry[]): string {
         for (let j=0; j<days.length; j++) {
             ret += daySum(projects[i], days[j], entries) + " |";
         };
-        ret += sumProject(projects[i], entries) + "\n";
+        ret += "**" + daySum(projects[i], undefined, entries) + "**\n";
     };
-    ret += "Total: |";
+    ret += "**Total:** |";
     for (i=0; i<days.length; i++) { // Sum up the days.
-        ret += "(totsum)" + " |";
+        // const startTime = days[i].clone().startOf("days").unix();
+        // const endTime = days[i].clone().endOf("days").unix();
+        ret += "**" + daySum(undefined, days[i], entries) + "** |";
     };
-    ret += " - \n";
+    ret += "**" + daySum(undefined, undefined, entries) + "**\n";
 
     return ret;
 }
