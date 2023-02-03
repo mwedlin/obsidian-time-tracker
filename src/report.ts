@@ -64,34 +64,13 @@ function daySum(project: String, day: Moment, entries: Entry[]) {
     return (sum/3600).toLocaleString(undefined, { maximumFractionDigits: 2});
 }
 
-// Sum all times for a project.
-// function sumProject(project: String, entries: Entry[]) {
-//     let sum = 0; // Seconds
-
-//     console.log("Project: ", project);
-//     for (let i=0; i < entries.length; i++) {
-//         if (project == entries[i].name) {
-//                 console.log("    Adding " + moment.unix(entries[i].startTime).format("YYYY-MM-DD") + ": " +
-//                 ((entries[i].endTime - entries[i].startTime)/3600).toLocaleString(undefined, { maximumFractionDigits: 2}));
-//                 sum += entries[i].endTime - entries[i].startTime;
-//         }
-//     }
-//     return (sum/3600).toLocaleString(undefined, { maximumFractionDigits: 2});
-// }
-
 async function createMarkdownTable(start, end, entries: Entry[]): string {
     console.log("Table with " + entries.length + " entries.")
     let days = await findDays(start, end);
     let projects = await await findProjects(entries);
 
-    // let table = [["Project", "Start time", "End time", "Duration"]];
-    // for (let entry of entries)
-    //    await table.push(...createTableSection(entry));
-
     let ret = "Project |";
-    // calculate the width every column needs to look neat when monospaced
-    // let widths = Array.from(Array(4).keys()).map(i => Math.max(...table.map(a => a[i].length)));
-    for (let i = 0; i < days.length; i++) { // First row
+   for (let i = 0; i < days.length; i++) { // First row
         ret += days[i].format(" dddd<br>YYYY-MM-DD |");
     };
     ret += " **Total**\n";
@@ -112,7 +91,7 @@ async function createMarkdownTable(start, end, entries: Entry[]): string {
         // const endTime = days[i].clone().endOf("days").unix();
         ret += "**" + daySum(undefined, days[i], entries) + "** |";
     };
-    ret += "**" + daySum(undefined, undefined, entries) + "**\n";
+    ret += "**" + daySum(undefined, undefined, entries) + "** \n";
 
     return ret;
 }
@@ -226,7 +205,8 @@ export class ReportModal extends Modal {
 
   onOpen() {
     const settings = app.settings;
-    console.log("app: " + Object.keys(app));
+    console.log("app: " + Object.keys(this.app));
+    // console.log("e: " + Object.keys(e));
     
     const { contentEl } = this;
     let hdr = contentEl.createEl("H2").setText("Report as table")
