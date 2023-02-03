@@ -38,6 +38,14 @@ export default class TimeTrackerPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: `Report`,
+			name: `Report times`,
+			editorCallback: async (e, _) => {
+				new ReportModal(this.app).open();
+			}
+		});
+
+		this.addCommand({
 			id: `debug`,
 			name: `Debug files`,
 			callback: async (e, _) => {
