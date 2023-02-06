@@ -1,6 +1,7 @@
 import { moment, App, MarkdownSectionInformation, ButtonComponent, TextComponent, obsidianApp, MomentFormatComponent } from "obsidian";
 import { TimeTrackerSettings } from "./settings";
 import { stopAll, readAll, FileSection } from "./files"
+import { allTracks, daySum, findProjects } from "./report"
 // const nldatesPlugin = obsidianApp.plugins.getPlugin("nldates-obsidian");
 
 export interface Tracker {
@@ -64,6 +65,10 @@ export function displayTracker(tracker: Tracker, element: HTMLElement, getSectio
             break;
         case "status":
             displayStatus(tracker, element, getSectionInfo, settings);
+            break;
+        case "today":
+            console.log("Evaluating display type today.")
+            displayToday(tracker, element, getSectionInfo, settings);
             break;
         default: // Also "default" and "compact"
             displayTrackerDefault(tracker, element, getSectionInfo, settings);
@@ -206,7 +211,7 @@ export async function displayStatus(tracker: Tracker, element: HTMLElement, getS
     let tbl = element.createEl("table", { cls: "time-tracker-table" });
     let row1 = tbl.createEl("tr");
     if (activeSection) { // Found an active section.
-        let t = "Active timer in [[" + activeSection.file.path + "]]";
+        let t = "Active timer in note " + activeSection.file.path;
         // Start/Stop button
         let td1 = row1.createEl("td");
         let btn = new ButtonComponent(td1)
@@ -224,6 +229,31 @@ export async function displayStatus(tracker: Tracker, element: HTMLElement, getS
         let td1 = row1.createEl("td").createEl("span", {text: "No active trackers running.", color: "green"});
     };
 }
+
+export async function displayToday(tracker: Tracker, element: HTMLElement, getSectionInfo: () => MarkdownSectionInformation, settings: TimeTrackerSettings): void {
+    const format = settings.timestampFormat;
+
+    let startTime = moment().startOf("day").unix(); // First second of today
+    let endTime = moment().endOf("day").unix(); // Last second of today
+    console.log("Intervall OK: " + startTime +
+            "(" + moment.unix(startTime).format(format) + ") -- " +
+            endTime + "(" + moment.unix(endTime).format(format) + ")"
+            );
+    let all = await allTracks(startTime, endTime);
+    let proj = await findProjects(all);
+    console.log("Projects: ", proj);
+    let tbl = element.createEl("table", { cls: "time-tracker-table" });
+    tbl.createEl("tr").append(
+        createEl("th", { text: "Project" }),
+        createEl("th", { text: "Duration (hours)" }));
+    // navigator.clipboard.writeText(await createMarkdownTable(startTime, endTime, all));
+    for (let i=0; i < proj.length; i++) {
+        ds = daySum(proj[i], moment(), all);
+        let row1 = tbl.createEl("tr");
+        let td1 = row1.createEl("td", { text: proj[i] });
+        let td2 = row1.createEl("td", { text:  ds });
+    };
+};
 
 function startSubEntry(entry: Entry, name: string) {
     // if this entry is not split yet, we add its time as a sub-entry instead

@@ -7,7 +7,7 @@ import { FileSection, readAll } from "./files";
 import * as moment from "moment";
 
 // Return a list of all the projects in 
-function findProjects(entries: Entry[]):String[] {
+export function findProjects(entries: Entry[]):String[] {
     let str: String[] = [];
 
     for (i=0; i<entries.length; i++) {
@@ -18,7 +18,7 @@ function findProjects(entries: Entry[]):String[] {
 }
 
 // Return an array of moments for days in the interval
-function findDays(start, end): Moment[] {
+export function findDays(start, end): Moment[] {
     
     let r: Moment[] = [];
     console.log("Days: " + moment.unix(start).format("YYYY-MM-DD HH.mm.ss") + "(" + start + ") -> " + moment.unix(end).format("YYYY-MM-DD HH.mm.ss") + " (" + end + ")");
@@ -34,17 +34,19 @@ function findDays(start, end): Moment[] {
 // Return a string with the number hours worked on a project on a specific day.
 // If project is undefined, report a total sum of all projects this day.
 // If day = undefined, report time of all days in project.
-function daySum(project: String, day: Moment, entries: Entry[]) {
+export function daySum(project: String, day: Moment, entries: Entry[]) {
     let sum = 0; // Seconds
     var doAll: Boolean;
     var dayStart: Number;
     var dayEnd: Number;
 
+    console.log("Daysum over: " + project + ", " + day.format("YYYY-MM-DD") + ", " + entries.length + " entries.");
+
     if (day == undefined) {
         doAll = true;
     } else {
         doAll = false;
-        dayStart = day.unix();
+        dayStart = day.startOf("days").unix();
         dayEnd = day.clone().endOf("days").unix();
     };
     for (let i=0; i < entries.length; i++) {
@@ -61,6 +63,7 @@ function daySum(project: String, day: Moment, entries: Entry[]) {
             }
         }
     }
+    console.log("Sum is " + sum + " seconds.");
     return (sum/3600).toLocaleString(undefined, { maximumFractionDigits: 2});
 }
 
@@ -146,51 +149,53 @@ function toName(project: String, client: String): String {
 }
 
 // Make a list of all time entries between the to entries.
-async function allTracks(start: number, end: number): Entry[] {
+export async function allTracks(start: number, end: number): Entry[] {
     let ret: Entry = [];
     let allEntries = await readAll();
 
     console.log("AllTracks with " + allEntries.length + " entries.")
     var i, j, k;
     for (i=0; i<allEntries.length; i++) {
-        console.log("Reading file: " + allEntries[i].file.path)
-        for (j=0; j<allEntries[i].tracker.entries.length; j++){
-            if (allEntries[i].tracker.entries[j].subEntries) { // Loop through subEntries.
-                for (k=0; k<allEntries[i].tracker.entries[j].subEntries.length;k++) {
-                    if (isWithin(allEntries[i].tracker.entries[j].subEntries[k].startTime,
-                        allEntries[i].tracker.entries[j].subEntries[k].endTime,
-                        start, end)) {
-                        // Add this timestamp
-                        let thisStart = allEntries[i].tracker.entries[j].subEntries[k].startTime;
-                        let thisEnd = allEntries[i].tracker.entries[j].subEntries[k].endTime;
+        console.log("Reading file: " + allEntries[i].file.path);
+        if (allEntries[i].tracker.entries) {
+            for (j=0; j<allEntries[i].tracker.entries.length; j++){
+                if (allEntries[i].tracker.entries[j].subEntries) { // Loop through subEntries.
+                    for (k=0; k<allEntries[i].tracker.entries[j].subEntries.length;k++) {
+                        if (isWithin(allEntries[i].tracker.entries[j].subEntries[k].startTime,
+                            allEntries[i].tracker.entries[j].subEntries[k].endTime,
+                            start, end)) {
+                            // Add this timestamp
+                            let thisStart = allEntries[i].tracker.entries[j].subEntries[k].startTime;
+                            let thisEnd = allEntries[i].tracker.entries[j].subEntries[k].endTime;
+                            if (thisStart < start) thisStart = start;
+                            if (thisEnd > end) thisEnd = end;
+                            let name = toName(allEntries[i].tracker.project, allEntries[i].tracker.client);
+                            let e:Entry = {name: name, startTime: thisStart,
+                                            endTime: thisEnd, subEntries: undefined };
+                            ret.push(e);
+                            console.log("Subentry from " + allEntries[i].file.path +
+                                ": " + name +
+                                " " + moment.unix(thisStart).format("YYYY-MM-DD HH:mm:ss") +
+                                " -- " + moment.unix(thisEnd).format("YYYY-MM-DD HH:mm:ss"));
+                        }
+                    }
+                } else { // No subentries
+                    if (isWithin(allEntries[i].tracker.entries[j].startTime,
+                                 allEntries[i].tracker.entries[j].endTime,
+                                 start, end)) {
+                        let thisStart = allEntries[i].tracker.entries[j].startTime;
+                        let thisEnd = allEntries[i].tracker.entries[j].endTime;
                         if (thisStart < start) thisStart = start;
                         if (thisEnd > end) thisEnd = end;
                         let name = toName(allEntries[i].tracker.project, allEntries[i].tracker.client);
                         let e:Entry = {name: name, startTime: thisStart,
                                        endTime: thisEnd, subEntries: undefined };
                         ret.push(e);
-                        console.log("Subentry from " + allEntries[i].file.path +
-                        ": " + name +
-                        " " + moment.unix(thisStart).format("YYYY-MM-DD HH:mm:ss") +
-                        " -- " + moment.unix(thisEnd).format("YYYY-MM-DD HH:mm:ss"));
+                        console.log("Entry from " + allEntries[i].file.path +
+                                    ": " + name +
+                                    " " + moment.unix(thisStart).format("YYYY-MM-DD HH:mm:ss") +
+                                    " -- " + moment.unix(thisEnd).format("YYYY-MM-DD HH:mm:ss"));
                     }
-                }
-            } else { // No subentries
-                if (isWithin(allEntries[i].tracker.entries[j].startTime,
-                             allEntries[i].tracker.entries[j].endTime,
-                             start, end)) {
-                    let thisStart = allEntries[i].tracker.entries[j].startTime;
-                    let thisEnd = allEntries[i].tracker.entries[j].endTime;
-                    if (thisStart < start) thisStart = start;
-                    if (thisEnd > end) thisEnd = end;
-                    let name = toName(allEntries[i].tracker.project, allEntries[i].tracker.client);
-                    let e:Entry = {name: name, startTime: thisStart,
-                                   endTime: thisEnd, subEntries: undefined };
-                    ret.push(e);
-                    console.log("Entry from " + allEntries[i].file.path +
-                    ": " + name +
-                    " " + moment.unix(thisStart).format("YYYY-MM-DD HH:mm:ss") +
-                    " -- " + moment.unix(thisEnd).format("YYYY-MM-DD HH:mm:ss"));
                 }
             }
         }
