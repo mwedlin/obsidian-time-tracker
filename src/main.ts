@@ -25,7 +25,15 @@ export default class TimeTrackerPlugin extends Plugin {
 			id: `insert`,
 			name: `Insert Time Tracker`,
 			editorCallback: (e, _) => {
-				e.replaceSelection("```time-tracker\n```\n");
+				e.replaceSelection('```time-tracker\n{"dispType":"default","currTask":"","project":"CUAS","client":"","entries": []}\n```\n');
+			}
+		});
+
+		this.addCommand({
+			id: `insert status`,
+			name: `Insert Time Tracker Status`,
+			editorCallback: (e, _) => {
+				e.replaceSelection('```time-tracker\n{"dispType":"status"}\n```\n');
 			}
 		});
 
