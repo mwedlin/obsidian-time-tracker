@@ -40,11 +40,11 @@ export function daySum(project: String, day: Moment, entries: Entry[]) {
     var dayStart: Number;
     var dayEnd: Number;
 
-    console.log("Daysum over: " + project + ", " + day.format("YYYY-MM-DD") + ", " + entries.length + " entries.");
-
     if (day == undefined) {
+        console.log("Daysum over: " + project + ", " + entries.length + " entries.");
         doAll = true;
     } else {
+        console.log("Daysum over: " + project + ", " + day.format("YYYY-MM-DD") + ", " + entries.length + " entries.");
         doAll = false;
         dayStart = day.startOf("days").unix();
         dayEnd = day.clone().endOf("days").unix();
