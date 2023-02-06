@@ -1,6 +1,6 @@
 import { moment, App, MarkdownSectionInformation, ButtonComponent, TextComponent, obsidianApp, MomentFormatComponent } from "obsidian";
 import { TimeTrackerSettings } from "./settings";
-import { stopAll } from "./files"
+import { stopAll, readAll, FileSection } from "./files"
 // const nldatesPlugin = obsidianApp.plugins.getPlugin("nldates-obsidian");
 
 export interface Tracker {
@@ -31,6 +31,7 @@ export async function saveTracker(tracker: Tracker, app: App, section: MarkdownS
     // edit only the code block content, leave the rest untouched
     content = `${prev}\n${JSON.stringify(tracker)}\n${next}`;
 
+    console.log("Modify file: " + file.path)
     await app.vault.modify(file, content);
 }
 
@@ -60,6 +61,9 @@ export function displayTracker(tracker: Tracker, element: HTMLElement, getSectio
 
     switch (tracker.dispType) {
         case "legacy":
+            break;
+        case "status":
+            displayStatus(tracker, element, getSectionInfo, settings);
             break;
         default: // Also "default" and "compact"
             displayTrackerDefault(tracker, element, getSectionInfo, settings);
@@ -180,6 +184,47 @@ export function displayTrackerDefault(tracker: Tracker, element: HTMLElement, ge
     }, 1000);
 }
 
+// View a short status of the time tracking system.
+export async function displayStatus(tracker: Tracker, element: HTMLElement, getSectionInfo: () => MarkdownSectionInformation, settings: TimeTrackerSettings): void {
+    console.log("Display status.");
+
+    // Find first running entry.
+    const sections = await readAll();
+    var activeSection;
+
+    for (let i = 0; i<sections.length; i++) {
+        if (isRunning(sections[i].tracker)) {
+            console.log("Found running section in file " + sections[i].file.path + " at " + sections[i].startPos);
+            activeSection = sections[i];
+            // const content = await this.app.vault.read(sections[i].file);
+            break; // Have to reread all sections to get the positions right again
+        } else {
+            console.log(sections[i].file.path + " at " + sections[i].startPos + " is not running.");
+        };
+    };
+
+    let tbl = element.createEl("table", { cls: "time-tracker-table" });
+    let row1 = tbl.createEl("tr");
+    if (activeSection) { // Found an active section.
+        let t = "Active timer in [[" + activeSection.file.path + "]]";
+        // Start/Stop button
+        let td1 = row1.createEl("td");
+        let btn = new ButtonComponent(td1)
+            .setClass("clickable-icon")
+            .setIcon(`lucide-stop-circle`)
+            .setTooltip("Stop all trackers")
+            .onClick(async () => {
+                await stopAll();
+                td1 = createEl("span", {text: "No active trackers running.", color: "green"});
+                // await saveTracker(tracker, this.app, getSectionInfo());
+            });
+        btn.buttonEl.addClass("time-tracker-btn");
+        let td2 = row1.createEl("td").createEl("span", {text: t});
+    } else {
+        let td1 = row1.createEl("td").createEl("span", {text: "No active trackers running.", color: "green"});
+    };
+}
+
 function startSubEntry(entry: Entry, name: string) {
     // if this entry is not split yet, we add its time as a sub-entry instead
     if (!entry.subEntries) {
@@ -231,6 +276,7 @@ function removeEntry(entries: Entry[], toRemove: Entry): boolean {
 }
 
 export function isRunning(tracker: Tracker): boolean {
+    if (tracker.entries == undefined) return false;
     return !!getRunningEntry(tracker.entries);
 }
 
@@ -314,28 +360,6 @@ export function parseDate(dt: String, format: String): Moment {
     };
     return res;
 }
-
-// function createMarkdownTable(tracker: Tracker, settings: TimeTrackerSettings): string {
-//    let table = [["task", "Start time", "End time", "Duration"]];
-//    for (let entry of tracker.entries)
-//        table.push(...createTableSection(entry, settings));
-//    table.push(["**Total**", "", "", `**${formatDuration(getTotalDuration(tracker.entries))}**`]);
-
-//    let ret = "";
-    // calculate the width every column needs to look neat when monospaced
-//    let widths = Array.from(Array(4).keys()).map(i => Math.max(...table.map(a => a[i].length)));
-//    for (let r = 0; r < table.length; r++) {
-        // add separators after first row
-//        if (r == 1)
-//            ret += Array.from(Array(4).keys()).map(i => "-".repeat(widths[i])).join(" | ") + "\n";
-
-//        let row: string[] = [];
-//        for (let i = 0; i < 4; i++)
-//            row.push(table[r][i].padEnd(widths[i], " "));
-//        ret += row.join(" | ") + "\n";
-//    }
-//    return ret;
-//}
 
 function createCsv(tracker: Tracker, settings: TimeTrackerSettings): string {
     let ret = "";
