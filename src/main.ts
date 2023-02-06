@@ -38,6 +38,14 @@ export default class TimeTrackerPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: `insert today status`,
+			name: `Insert Time Tracker for logged times today`,
+			editorCallback: (e, _) => {
+				e.replaceSelection('```time-tracker\n{"dispType":"today"}\n```\n');
+			}
+		});
+
+		this.addCommand({
 			id: `stop`,
 			name: `Stop all timers`,
 			editorCallback: (e, _) => {
