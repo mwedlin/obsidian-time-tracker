@@ -247,12 +247,17 @@ export async function displayToday(tracker: Tracker, element: HTMLElement, getSe
         createEl("th", { text: "Project" }),
         createEl("th", { text: "Duration (hours)" }));
     // navigator.clipboard.writeText(await createMarkdownTable(startTime, endTime, all));
+    let sum: Number = 0;
     for (let i=0; i < proj.length; i++) {
-        ds = daySum(proj[i], moment(), all);
+        let ds = daySum(proj[i], moment(), all);
+        sum += parseFloat(ds);
         let row1 = tbl.createEl("tr");
         let td1 = row1.createEl("td", { text: proj[i] });
         let td2 = row1.createEl("td", { text:  ds });
     };
+    let row1 = tbl.createEl("tr");
+    let td1 = row1.createEl("td", { text: "Total:" });
+    let td2 = row1.createEl("td", { text:  sum });
 };
 
 function startSubEntry(entry: Entry, name: string) {

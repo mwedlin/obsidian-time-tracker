@@ -64,7 +64,7 @@ export function daySum(project: String, day: Moment, entries: Entry[]) {
         }
     }
     console.log("Sum is " + sum + " seconds.");
-    return (sum/3600).toLocaleString(undefined, { maximumFractionDigits: 2});
+    return (sum/3600).toFixed(2);
 }
 
 async function createMarkdownTable(start, end, entries: Entry[]): string {
