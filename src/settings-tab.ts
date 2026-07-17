@@ -3,8 +3,10 @@ import TimeTrackerPlugin from "./main";
 import { defaultSettings, TimeTrackerSettings } from "./settings";
 import { favoriteCommandName } from "./favorites";
 import { toName } from "./report-logic";
+import { FileSuggestModal } from "./file-suggest-modal";
 
 type UpdateIntervalKey = keyof Pick<TimeTrackerSettings, "timerUpdateSeconds" | "statusUpdateSeconds" | "todayUpdateSeconds">;
+type TemplatePathKey = keyof Pick<TimeTrackerSettings, "reportTemplatePath" | "trackerTableTemplatePath" | "trackerCsvTemplatePath">;
 
 export class TimeTrackerSettingsTab extends PluginSettingTab {
 
@@ -57,6 +59,30 @@ export class TimeTrackerSettingsTab extends PluginSettingTab {
             "Today widget update interval (seconds)",
             "How often the today widget's live numbers refresh.",
             "todayUpdateSeconds");
+
+        this.containerEl.createEl("h3", { text: "Templater integration" });
+        this.containerEl.createEl("p", {
+            text: "Optionally replace this plugin's built-in table/CSV format with your own " +
+                "Templater template, for one or more of the outputs below. Requires the Templater " +
+                "community plugin. Path is vault-relative (e.g. \"Templates/report.md\"); leave blank " +
+                "to keep the built-in format. Point it at a folder instead of a single file to be " +
+                "prompted to pick one of that folder's template files each time. Your template must " +
+                "call this plugin's API - app.plugins.plugins[\"time-tracker\"].api.consumeReportData() " +
+                "or .consumeTrackerRows() - as its first step to retrieve the data.",
+        });
+
+        this.addTemplatePathSetting(
+            "Report table template",
+            "Used by the Report command's \"Append table at cursor\" button.",
+            "reportTemplatePath");
+        this.addTemplatePathSetting(
+            "Tracker \"Copy as table\" template",
+            "Used by a tracker's \"Copy as table\" button.",
+            "trackerTableTemplatePath");
+        this.addTemplatePathSetting(
+            "Tracker \"Copy as CSV\" template",
+            "Used by a tracker's \"Copy as CSV\" button.",
+            "trackerCsvTemplatePath");
 
         this.containerEl.createEl("h3", { text: "Favorite projects" });
         this.containerEl.createEl("p", {
@@ -130,5 +156,34 @@ export class TimeTrackerSettingsTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 });
             });
+    }
+
+    // Unlike addUpdateIntervalSetting above, an empty value here is valid and
+    // expected (it means "use the built-in format") - not replaced with a
+    // fallback default. The "Browse" button opens a fuzzy file picker
+    // (FileSuggestModal) so the user doesn't have to type/remember an exact
+    // vault-relative path by hand.
+    private addTemplatePathSetting(name: string, desc: string, key: TemplatePathKey): void {
+        new Setting(this.containerEl)
+            .setName(name)
+            .setDesc(desc)
+            .addText(t => {
+                t.setPlaceholder("(built-in format)");
+                t.setValue(this.plugin.settings[key]);
+                t.onChange(async v => {
+                    this.plugin.settings[key] = v;
+                    await this.plugin.saveSettings();
+                });
+            })
+            .addButton(b => b
+                .setIcon("lucide-search")
+                .setTooltip("Browse for a template file")
+                .onClick(() => {
+                    new FileSuggestModal(this.app, this.app.vault.getMarkdownFiles(), async file => {
+                        this.plugin.settings[key] = file.path;
+                        await this.plugin.saveSettings();
+                        this.display();
+                    }).open();
+                }));
     }
 }

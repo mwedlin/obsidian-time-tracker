@@ -6,7 +6,7 @@
 
 import moment from "moment";
 import { Moment } from "moment";
-import { Entry } from "./types";
+import { Entry, ReportData } from "./types";
 import { escapeMarkdownCell } from "./text-escape";
 
 // Construct a display name from project and client.
@@ -91,35 +91,54 @@ export function daySum(project: string, day: Moment, entries: Entry[]): string {
     return (daySumSeconds(project, day, entries) / 3600).toFixed(2);
 }
 
+// Precompute a report's full data grid (raw seconds, no formatting) - shared
+// by createMarkdownTable below and exposed via the plugin's public API
+// (api.ts) for Templater templates to consume instead.
+export function buildReportData(start: number, end: number, entries: Entry[]): ReportData {
+    const days = findDays(start, end);
+    const projects = findProjects(entries);
+
+    const cellsSeconds = projects.map(project => days.map(day => daySumSeconds(project, day, entries)));
+    const projectTotalSeconds = projects.map(project => daySumSeconds(project, undefined, entries));
+    const dayTotalSeconds = days.map(day => daySumSeconds(undefined, day, entries));
+    const grandTotalSeconds = daySumSeconds(undefined, undefined, entries);
+
+    return {
+        days: days.map(day => day.format("YYYY-MM-DD")),
+        projects,
+        cellsSeconds,
+        projectTotalSeconds,
+        dayTotalSeconds,
+        grandTotalSeconds,
+        entries,
+    };
+}
+
 // Build a markdown table: rows = projects, columns = days + a Total column.
 export function createMarkdownTable(start: number, end: number, entries: Entry[]): string {
-    let days = findDays(start, end);
-    let projects = findProjects(entries);
+    const data = buildReportData(start, end, entries);
 
     let ret = "Project |";
-    for (let i = 0; i < days.length; i++) { // First row
-        ret += days[i].format(" dddd<br>YYYY-MM-DD |");
+    for (const day of data.days) { // First row
+        ret += moment(day, "YYYY-MM-DD").format(" dddd<br>YYYY-MM-DD |");
     }
     ret += " **Total**\n";
-    for (let i = 0; i < days.length + 1; i++) { // add separators after first row
+    for (let i = 0; i < data.days.length + 1; i++) { // add separators after first row
         ret += "---|";
     }
     ret += "---\n";
-    for (let i = 0; i < projects.length; i++) { // Project sums
-        // projects[i] itself must stay unescaped below (daySum matches it
-        // verbatim against entry names); only escape it where it's written
-        // into the generated table.
-        ret += escapeMarkdownCell(projects[i]) + " |";
-        for (let j = 0; j < days.length; j++) {
-            ret += daySum(projects[i], days[j], entries) + " |";
+    for (let p = 0; p < data.projects.length; p++) { // Project sums
+        ret += escapeMarkdownCell(data.projects[p]) + " |";
+        for (let d = 0; d < data.days.length; d++) {
+            ret += (data.cellsSeconds[p][d] / 3600).toFixed(2) + " |";
         }
-        ret += "**" + daySum(projects[i], undefined, entries) + "**\n";
+        ret += "**" + (data.projectTotalSeconds[p] / 3600).toFixed(2) + "**\n";
     }
     ret += "**Total:** |";
-    for (let i = 0; i < days.length; i++) { // Sum up the days.
-        ret += "**" + daySum(undefined, days[i], entries) + "** |";
+    for (let d = 0; d < data.days.length; d++) { // Sum up the days.
+        ret += "**" + (data.dayTotalSeconds[d] / 3600).toFixed(2) + "** |";
     }
-    ret += "**" + daySum(undefined, undefined, entries) + "** \n";
+    ret += "**" + (data.grandTotalSeconds / 3600).toFixed(2) + "** \n";
 
     return ret;
 }

@@ -5,7 +5,7 @@ process.env.TZ = "America/New_York";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import moment from "moment";
-import { toName, isWithin, findProjects, findDays, daySum, daySumSeconds } from "../src/report-logic";
+import { toName, isWithin, findProjects, findDays, daySum, daySumSeconds, buildReportData } from "../src/report-logic";
 import { Entry } from "../src/types";
 
 test("toName combines project and client, falling back sensibly", () => {
@@ -69,4 +69,25 @@ test("daySumSeconds returns the raw, unrounded seconds behind daySum's hours str
 
     assert.equal(daySumSeconds("P", day, entries), 1800);
     assert.equal(daySum("P", day, entries), (1800 / 3600).toFixed(2));
+});
+
+test("buildReportData computes the same raw-seconds grid createMarkdownTable renders from", () => {
+    const day = moment("2024-06-15", "YYYY-MM-DD");
+    const dayStart = day.clone().startOf("day").unix();
+    const dayEnd = day.clone().endOf("day").unix();
+
+    const entries: Entry[] = [
+        { name: "P", startTime: dayStart, endTime: dayStart + 3600, subEntries: null }, // 1h
+        { name: "Q", startTime: dayStart + 3600, endTime: dayStart + 3600 * 2, subEntries: null }, // 1h
+    ];
+
+    const data = buildReportData(dayStart, dayEnd, entries);
+    assert.deepEqual(data.days, [day.format("YYYY-MM-DD")]);
+    assert.deepEqual(data.projects, ["P", "Q"]);
+    assert.equal(data.cellsSeconds[0][0], 3600);
+    assert.equal(data.cellsSeconds[1][0], 3600);
+    assert.deepEqual(data.projectTotalSeconds, [3600, 3600]);
+    assert.deepEqual(data.dayTotalSeconds, [7200]);
+    assert.equal(data.grandTotalSeconds, 7200);
+    assert.equal(data.entries, entries);
 });

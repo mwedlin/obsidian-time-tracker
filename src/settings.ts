@@ -8,6 +8,9 @@ export const defaultSettings: TimeTrackerSettings = {
     statusUpdateSeconds: 1,
     todayUpdateSeconds: 30,
     favoriteProjects: [],
+    reportTemplatePath: "",
+    trackerTableTemplatePath: "",
+    trackerCsvTemplatePath: "",
 };
 
 export interface TimeTrackerSettings {
@@ -26,5 +29,13 @@ export interface TimeTrackerSettings {
     // plugin. Adding/removing favorites requires reloading the plugin, since
     // commands are registered once at onload.
     favoriteProjects: Favorite[];
+
+    // Vault-relative paths to Templater template files, one per output
+    // surface; empty (the default) keeps that surface's built-in hardcoded
+    // format completely unchanged. See design.md's Templater integration
+    // section.
+    reportTemplatePath: string;         // the Report command's table
+    trackerTableTemplatePath: string;   // a tracker's "Copy as table" button
+    trackerCsvTemplatePath: string;     // a tracker's "Copy as CSV" button
 
 }

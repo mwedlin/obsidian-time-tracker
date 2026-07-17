@@ -15,11 +15,17 @@ unit-tested under plain Node (`tests/`, see improvement #4 below):
 
 | File | Depends on Obsidian? | Contents |
 |---|---|---|
-| `types.ts` | no | `Entry`/`Tracker` interfaces |
-| `model.ts` | no | tracker state machine (start/stop/split/remove), duration/timestamp formatting, CSV/table row building |
-| `report-logic.ts` | no | pure report math: `toName`, `isWithin`, `findProjects`, `findDays`, `daySumSeconds`/`daySum`, `createMarkdownTable` |
+| `types.ts` | no | `Entry`/`Tracker` interfaces, `ReportData`/`TrackerRow` (Templater-facing data shapes) |
+| `model.ts` | no | tracker state machine (start/stop/split/remove), duration/timestamp formatting, `flattenEntries`, CSV/table row building |
+| `report-logic.ts` | no | pure report math: `toName`, `isWithin`, `findProjects`, `findDays`, `daySumSeconds`/`daySum`, `buildReportData`, `createMarkdownTable` |
+| `zip-path-safety.ts` | no | `sanitizeRelativePath` — zip-slip-safe path validation for the template kit installer |
 | `dateutil.ts` | yes (`App` type only) | `parseDate` — strict format, falls back to the nldates-obsidian plugin |
+| `templater.ts` | yes (`App` type only) | `renderTemplaterFile` — soft dependency on the Templater community plugin |
+| `api.ts` | yes (`App` type only) | this plugin's public API (`app.plugins.plugins["time-tracker"].api`) + the internal "stash and consume" state behind it |
 | `confirm-modal.ts` | yes | reusable "are you sure?" dialog |
+| `file-suggest-modal.ts` | yes | fuzzy file picker, used by the Templater path settings and the kit installer |
+| `folder-suggest-modal.ts` | yes | fuzzy folder picker, used by the kit installer |
+| `template-kit-installer.ts` | yes | `InstallTemplateKitModal` — installs a `.zip` of Templater templates into a chosen vault folder |
 | `ticker.ts` | yes (DOM) | single shared 1s interval for all rendered trackers |
 | `files.ts` | yes | vault-wide scanning/rewriting (`readAll`, `stopAll`) |
 | `tracker.ts` | yes | per-note rendering (`displayTracker` and friends), `saveTracker` |
@@ -288,7 +294,14 @@ is pure and lives in `report-logic.ts`:
    (clipped to the boundary), relabeling each one's `name` to `toName(project, client)`
    (`"Project/Client"`, or whichever half exists) — so from this point on, "project" really means
    "project/client pair". (A split entry's `subEntries` are treated as `entry.subEntries ?? [entry]`,
-   collapsing what used to be two near-identical loops in the original code into one.)
+   collapsing what used to be two near-identical loops in the original code into one.) Each record also
+   keeps the entry's own task name in a separate `task` field (`Entry.task`, optional - only ever set
+   here, never on entries as actually stored in a tracker's JSON), since `name` itself gets overwritten
+   with the project/client composite - a template that wants to group/sum by task rather than just by
+   project/client (see `invoice.md` below) needs this. This is also why the tracker UI's "Task" text
+   field (`newTaskNameBox` in `tracker.ts`) and a stored entry's `name` field can read as synonyms - they
+   are the same field, just named differently in the UI vs. the type; `task` only exists as a separate
+   field on these Report-pipeline records, where `name` no longer means that.
 2. `findProjects(entries)` — the sorted set of distinct composed names present in that flattened list.
 3. `findDays(start, end)` — one moment per calendar day covering `[start, end]`, stepping with moment's
    DST-aware `.add(1, "day")` (see improvement #8 — the original fixed-24h-step version double-counted a
@@ -297,14 +310,20 @@ is pure and lives in `report-logic.ts`:
    `undefined`) and a given day (or the whole range, if `undefined`); `daySum` is a thin wrapper that
    formats this as a `"12.34"`-style hours string. `daySumSeconds` is reused for every table cell, every
    per-project total, every per-day total, the grand total, and the `status` widget's live "Today" timer.
-5. `createMarkdownTable(start, end, entries)` — assembles a Markdown table: rows = projects (from step
-   2), columns = days (from step 3) + a **Total** column, cells = `daySum` per project/day.
+5. `buildReportData(start, end, entries)` — packages steps 2–4 into a `ReportData` object (raw seconds,
+   no formatting): `days`/`projects` arrays, a `cellsSeconds[project][day]` grid, per-project/per-day/grand
+   totals, and the flattened `entries` themselves as an escape hatch. This is the data handed to a
+   Templater template (see "Templater integration" below); it's also the input `createMarkdownTable`
+   itself now builds from, so there's exactly one place that computes the grid.
+6. `createMarkdownTable(start, end, entries)` — calls `buildReportData`, then formats it into a Markdown
+   table: rows = projects, columns = days + a **Total** column, cells = hours to 2 decimals.
 
 `ReportModal` (in `report.ts`) is the UI for the `Report` command: two text boxes (From/To) parsed
 by `parseDate`, a "Check dates" button that just normalizes/echoes the parsed dates back into the boxes,
-and "Append table at cursor" which runs the full pipeline above and hands the resulting Markdown table
-back to the caller via an `onSubmit` callback (`main.ts` wires that callback to
-`editor.replaceSelection`).
+and "Append table at cursor" which runs the full pipeline above and hands the resulting text back to the
+caller via an `onSubmit` callback (`main.ts` wires that callback to `editor.replaceSelection`) — via
+`buildReportText`, which uses a configured Templater template instead of `createMarkdownTable` when
+`settings.reportTemplatePath` is set (see below).
 
 ### Timezone
 
@@ -326,12 +345,20 @@ attribute the same instant to different calendar days depending on which device 
   entry's elapsed-today time separately, via `getRunningEntry`, and adding it back on top of the
   `allTracks`-derived total — see the Display modes section above), so they do reflect a running timer's
   time live. The `Report` command's table does **not** work around it — a running entry still contributes
-  nothing to a report until it's stopped — but `ReportModal` now shows a non-blocking warning
-  ("⚠ A timer is currently running and won't be included...") when it detects one running anywhere in the
-  vault at the time the modal opens, rather than silently producing an incomplete report. A blocking
-  "stop it first?" confirmation was considered and rejected: generating a report and stopping your current
-  timer are different actions, and forcing that choice risks an unwanted side effect (ending a work
-  session) just to preview numbers.
+  nothing to a report until it's stopped — but `ReportModal` shows a non-blocking warning
+  ("⚠ A timer is currently running within this period and won't be included...") rather than silently
+  producing an incomplete report. A blocking "stop it first?" confirmation was considered and rejected:
+  generating a report and stopping your current timer are different actions, and forcing that choice
+  risks an unwanted side effect (ending a work session) just to preview numbers.
+
+  The warning only appears once both From/To fields parse to valid dates (re-checked live via each field's
+  `onChange`, and again after "Check dates" normalizes them - `TextComponent.setValue` doesn't itself fire
+  `onChange`) *and* a currently running entry's elapsed-so-far window actually overlaps that specific
+  range (`hasRunningTimerWithin`, treating a still-running entry's open-ended time as running "from its
+  start time through right now," the same convention the `status`/`today` widgets use for a live timer -
+  reusing the existing `isWithin`/`getRunningEntry` helpers, no new logic beyond that). A timer running
+  somewhere in the vault but outside the chosen range no longer triggers it - only one that would actually
+  leave a gap in *this* report does.
 - **A ~1-second-per-midnight-crossing rounding quirk**, found while verifying the above: an entry
   spanning midnight gets clipped to each day's `[startOf("days"), endOf("days")]` window in
   `daySumSeconds`. `endOf("days")` computes `23:59:59.999`, but `.unix()` truncates that to whole
@@ -392,13 +419,200 @@ surfaces a `Notice` instead of guessing.
 - `favoriteProjects` (`Favorite[]`, default `[]`) — see the Favorites entry under Commands above. The
   settings tab lets you add a project/client pair (skipping exact duplicates) and remove existing ones;
   like `debugMode`, changes need a plugin reload to take effect.
+- `reportTemplatePath` / `trackerTableTemplatePath` / `trackerCsvTemplatePath` (each `string`, default
+  `""`) — vault-relative paths to Templater template files for the Report command's table, a tracker's
+  "Copy as table" button, and its "Copy as CSV" button respectively. Unlike the settings above, an empty
+  value here is the valid, expected default (keep the built-in hardcoded format) — the settings tab
+  doesn't fall back to anything else on empty input. Each has a "Browse" button next to its text field
+  that opens `FileSuggestModal` (`src/file-suggest-modal.ts`, a `FuzzySuggestModal<TFile>` over
+  `app.vault.getMarkdownFiles()`) so the path doesn't have to be typed by hand - this browse button only
+  picks a single file; typing a folder path directly is how you opt into the per-use picker described
+  below. See "Templater integration" below.
 
 ## External/optional integrations
 
 - **nldates-obsidian** — optional, enables relaxed natural-language date parsing in `parseDate`.
+- **Templater** — optional, lets a user replace this plugin's hardcoded output formats with their own
+  template. See "Templater integration" below.
 - **buttons** (community plugin) — not called by this plugin's code at all; `test-vault/Tidsredovisning.md`
   shows the *user* embedding a `buttons`-plugin block that invokes this plugin's own "Stop all timers"
   command by name. It's a composition the vault author set up, not something `time-tracker` renders itself.
+
+## Templater integration (templating system for the Report table and Copy as table/CSV)
+
+Both output surfaces this plugin generates — the `Report` command's table and a tracker's own
+"Copy as table"/"Copy as CSV" buttons — were previously hardcoded Markdown/CSV formats in TypeScript. They
+can now be replaced, per-surface, with a normal [Templater](https://github.com/SilentVoid13/Templater)
+template (full JS, loops, conditionals) instead of this plugin building and maintaining its own template
+language. Each of the three settings above is independent and empty by default, so nothing changes unless
+a path is explicitly configured.
+
+**Split "compute" from "render".** Computing the data stays this plugin's job (`buildReportData` /
+`flattenEntries`, both pure and already covered by tests) — rendering it becomes the user's Templater
+template when one is configured. The data handed to a template is always raw seconds/numbers, never
+pre-formatted strings — formatting (decimal places, day headers, CSV quoting, whatever) is the template's
+decision, not baked in twice.
+
+**The "stash and consume" pattern (`src/api.ts`).** Templater's render entry point doesn't accept custom
+parameters, so there's no direct way to hand a template our computed data. The plugin computes the data
+and stashes it on its own public API object (`app.plugins.plugins["time-tracker"].api`) immediately before
+invoking Templater; the template's first step is to call `api.consumeReportData()` or
+`api.consumeTrackerRows()` to retrieve (and clear) it — the same general approach other community plugins
+(e.g. QuickAdd) use for passing data into a Templater render, just namespaced under this plugin's own api
+object instead of a bare `window` global. `consumeReportData`/`consumeTrackerRows` are the only stash-side
+methods on the *public* `TimeTrackerApi` type; the actual stashing methods (`stashReportData`/
+`stashTrackerRows`) live on a wider `InternalApi` type in `api.ts` that only this plugin's own code
+(`report.ts`, `tracker.ts`) casts to — a template author never needs or sees them.
+
+`TimeTrackerApi` also exposes `getReportData(start, end)` (an async, on-demand version of
+`buildReportData` for a template that wants a different range than what was stashed),
+`getTrackerRows(tracker)`, `formatTimestamp`/`formatDuration` (the same formatting this plugin's own
+built-in views use), and the CSV/Markdown escaping helpers (`escapeMarkdownCell`/`escapeCsvField`) — exposed
+for convenience, never auto-applied, since a template might not even be targeting Markdown or CSV.
+
+**Always falls back to the built-in format.** `buildReportText` (`report.ts`) and `buildTrackerOutput`
+(`tracker.ts`) both follow the same shape: if the relevant setting is empty, behavior is unchanged (call
+the existing `createMarkdownTable`/`createTrackerTable`/`createCsv` directly). If a path is configured,
+stash the data, call `renderTemplaterFile`, and use its output — but on `null` (Templater not installed,
+or the template file doesn't exist) *or* a thrown exception (a broken template), show a `Notice` and fall
+back to the built-in format anyway. A misconfigured template degrades to "you get the built-in output",
+never "nothing happens" — the report/copy action always produces something.
+
+**A template-path setting can point at a folder instead of a single file.** `buildReportText`/
+`buildTrackerOutput` both check `app.vault.getAbstractFileByPath(templatePath)` before rendering; if it
+resolves to a `TFolder`, the user is prompted (via `pickFile` in `src/file-suggest-modal.ts` - a
+`Promise`-wrapped `FuzzySuggestModal<TFile>`, scoped to that folder's own markdown files via
+`getMarkdownFilesInFolder`, recursing into subfolders) to choose which template file inside it to use for
+this run, and that file's path is used in place of the folder path for the rest of the flow (stash,
+render, fallback-on-failure) - otherwise unchanged. If that picker is cancelled (Escape, clicking
+outside - detected by overriding the modal's `onClose` and checking whether `onChooseItem` already fired),
+the function returns `null` rather than falling back to the built-in format: an explicit cancel means "I
+changed my mind," not "render anyway," so `ReportModal`'s "Append table at cursor" leaves the dialog open
+instead of inserting text, and a tracker's Copy button leaves the clipboard untouched, on a `null` result.
+
+**`templater.ts` reaches into Templater's undocumented internals, and this is an accepted, flagged
+tradeoff.** Templater has no official/stable public API for "render this template file and return the
+string" — `renderTemplaterFile` calls `app.plugins.plugins["templater-obsidian"].templater
+.create_running_config(...)` / `.read_and_parse_template(...)` with a `RunMode` value, based on the same
+undocumented surface other community integrations (e.g. QuickAdd) rely on. **Verified against Templater
+2.20.6's actual bundled source** (`test-vault/.obsidian/plugins/templater-obsidian/main.js`, once it got
+installed there) rather than just assumed: `create_running_config(template_file, target_file, run_mode)`
+returns `{template_file, target_file, run_mode, active_file}`, `read_and_parse_template(config)` reads
+`template_file`'s content and parses it, and `RunMode.DynamicProcessor` is enum value `4` — all confirmed
+by reading the minified source directly (grepping for `create_running_config`, `read_and_parse_template`,
+and the `RunMode` enum's `a[a.DynamicProcessor=4]` assignment). Since Templater's internals can still
+change in a future version, the try/catch + Notice-and-fall-back behavior above stays in place regardless
+— if rendering ever starts misbehaving after a Templater update, re-verify the same way (grep its
+`main.js`, or poke `app.plugins.plugins["templater-obsidian"].templater` in the console).
+
+**Known edge case, accepted as-is:** stashing then immediately rendering is not atomic. Clicking two
+template-triggering buttons in quick succession, before the first render's `await` resolves, could have
+the second stash overwrite the first before it's consumed. The same caveat applies to the community's
+`window`-global version of this pattern, so this isn't a regression — not mitigated with a queue, since the
+realistic trigger (clicking twice within a few hundred ms) is rare and the failure mode (wrong tracker's
+data in a paste) is easy to notice and redo.
+
+**Bug found via testing: picking a folder-based template from `ReportModal` looked like the date dialog
+"came back" instead of finishing.** Two independent causes, both fixed:
+1. `pickFile`/`pickFolder` (`file-suggest-modal.ts`/`folder-suggest-modal.ts`) resolve their wrapping
+   `Promise` from two places - the developer-supplied `onChooseItem` callback (a real selection) and an
+   overridden `onClose` (a cancel, e.g. Escape). The `onClose` override checked a `resolved` flag
+   *synchronously*, but Obsidian's own `SuggestModal` calls `onChooseItem` and `close()` as part of the
+   same selection with an order this code doesn't control - if `close()`'s `onClose` fired before
+   `onChooseItem` finished setting `resolved`, a real selection could read as a cancel (`Promise.resolve`
+   is a no-op on any later call, so the correct file/folder would already have lost the race by the time
+   `onChooseItem` ran). Fixed by deferring the `onClose` fallback with `setTimeout(..., 0)`: pushing it to
+   the next macrotask lets either ordering settle `resolved` first, regardless of which one Obsidian
+   happens to call first.
+2. Independently of (1), `ReportModal`'s "Append table at cursor" only called `this.close()` *after*
+   `buildReportText` resolved - meaning while a folder-based template's file-picker was open, the date
+   dialog was still open underneath it (Obsidian modals stack; nothing had told this one to close yet). On
+   both a real pick (before this was closing correctly for other reasons) and a cancel, the picker closing
+   revealed the still-open date dialog, reading as "it reappeared" whether or not the report actually
+   completed. Fixed by closing `ReportModal` *before* resolving the template, not after - the same restructure
+   also means a cancelled folder-picker now surfaces a `Notice` ("report cancelled") instead of trying to
+   silently leave an already-closed dialog "open".
+
+Starting-point example templates live in `test-vault/templates/` — kept inside the test vault (rather
+than at the repo root) so they can be pointed at directly while testing against the Templater plugin
+installed there: `report-table.md`/`tracker-table.md`/`tracker-csv.md` reproduce the three built-in
+formats, and `invoice.md` is a second Report-table template demonstrating that a template can ask its own
+questions beyond the Report dialog's From/To dates — via Templater's `tp.system.prompt`, it additionally
+asks which client to bill (matched against the combined "Project/Client" names by suffix, since that's
+the only name `ReportData` carries) and an optional hourly rate, then renders one invoice line per
+distinct task name, summing every work session across the range that shares that task (using
+`ReportData.entries[].task`, see above), rather than pre-summed per-project totals. See `README.md`'s
+Templater section.
+
+`invoice-html.md` is the same invoice logic as `invoice.md` again, but building an HTML string (a styled
+`<table>`, scoped under a `.tt-invoice` wrapper class so its inline `<style>` block can't bleed into the
+rest of the note it's inserted into, styled with Obsidian's own theme CSS variables rather than hardcoded
+colors) instead of a Markdown one - demonstrating that Templater doesn't care about output format at all,
+since a template is just building a string either way. It's still a normal `.md` template file (Templater
+templates are conventionally markdown files, and it's the only file type Obsidian's own editor can open
+normally) - only the string it *produces* contains HTML tags, which Obsidian's reading view/live preview
+already renders inline regardless of whether that HTML came from a hand-written note or a
+Templater-generated one. This is offered as the better fit over asking Templater to emit actual LaTeX
+source: Obsidian has no LaTeX compiler (its built-in LaTeX support is math-only, via MathJax/KaTeX's
+`$...$`/`$$...$$`, not general document typesetting), so raw `\begin{document}`-style LaTeX would just
+render as inert text - producing a real LaTeX-typeset document would need an entire separate LaTeX
+distribution installed and invoked, a much heavier, desktop-only dependency for what's fundamentally a
+"make the report look nicer" ask. HTML gets most of the same visual payoff (colors, borders, spacing,
+theme-aware styling) with no extra toolchain, renders immediately, and - since Obsidian's own **Export to
+PDF** renders that same view - still reaches "a nice PDF to send a client" without ever leaving Obsidian.
+
+## Template kit installer (`src/template-kit-installer.ts`)
+
+Motivated by the templating system above making custom output formats possible in the first place:
+someone (including the author) could sell/share a pre-built set of Templater templates as a "kit," and a
+kit of more than one file needs some way to get installed that's better than "unzip it yourself and drag
+files into your vault by hand." `Time Tracker: Install template kit` opens `InstallTemplateKitModal`,
+which:
+
+1. **Reads a `.zip` picked via drag-and-drop or a hidden `<input type="file">`** - deliberately not via
+   `app.vault`/Node's `fs`. The zip file itself lives *outside* the vault (a Downloads folder, wherever) -
+   `app.vault` is scoped strictly to the vault and can't reach it, and while a plugin *can* use Node/Electron
+   APIs to reach arbitrary OS paths on desktop, that would be desktop-only (mobile has no Node/Electron
+   access or Downloads-folder equivalent) and requires guessing at OS-specific paths. A standard HTML
+   `<input type="file">`/drag-and-drop, on the other hand, is a plain Web API: it opens the OS's native file
+   picker (desktop) or document picker (mobile), and hands back the chosen file's bytes directly
+   (`file.arrayBuffer()`) - no vault-relative path needed for this half at all, and no Node dependency, so
+   it works the same way cross-platform. Only the *write* side (extracting into the vault) touches
+   `app.vault`, which is exactly where it should stay sandboxed.
+2. **Parses it with `jszip`** (a new runtime dependency, pure JS, bundled into `main.js` by esbuild same as
+   the rest of the plugin - not marked `external` the way `obsidian`/`electron` are, since Obsidian doesn't
+   provide it itself).
+3. **Preserves whatever structure the zip has**, writing each entry to `<chosen target folder>/<its own
+   path inside the zip>` - loose files at the zip's root land flat in the target folder, a folder inside
+   the zip becomes a subfolder with its tree intact. There's no "flat vs. nested" mode to choose in the
+   installer itself: the kit's own author already decided that by how they built the zip, and replicating
+   its structure verbatim under the target folder reproduces either case with no extra logic.
+4. **Validates every entry's path before writing it anywhere** (`sanitizeRelativePath`,
+   `src/zip-path-safety.ts` - pure, unit-tested): rejects a `".."` segment appearing anywhere in an entry's
+   path, an absolute path, or a Windows drive letter, all classic **"zip slip"** vectors (a crafted archive
+   entry escaping the intended extraction folder to overwrite arbitrary files). This is a real, known risk
+   class for any "extract an untrusted zip" feature - confirmed non-hypothetical by reading `jszip`'s own
+   type definitions and source directly (`node_modules/jszip/index.d.ts` documents
+   `JSZipObject.unsafeOriginalName` with a citation to the zip-slip vulnerability by name): `jszip`'s own
+   internal path resolution (`lib/utils.js`'s `resolve()`) neutralizes `".."` traversal by simply discarding
+   excess `pop()`s on an empty result array, but does **not** strip a leading `/` - an entry literally named
+   `/etc/passwd` passes through `jszip`'s own "safe" name unchanged, confirming this plugin's own extra
+   validation layer is load-bearing, not redundant defense-in-depth. Any entry that fails validation is
+   skipped (never written) and counted in the completion `Notice` rather than silently dropped.
+5. **Never silently overwrites existing files.** If any target path already exists, a small purpose-built
+   two-button prompt ("Overwrite" / "Skip existing") decides the whole batch's behavior - not
+   `ConfirmModal` (styled for a single destructive Cancel/Remove decision that doesn't map cleanly onto
+   "install only the new ones"). Its two buttons resolve a `Promise` *before* calling `close()` precisely so
+   that an `onClose` fallback (for Escape/click-outside, resolving `false`) can't race with a button's own
+   resolution - `Promise.resolve` is a no-op on any call after the first, so whichever fires first wins
+   safely.
+6. **Creates missing intermediate folders** via a small recursive `ensureFolder`, since
+   `vault.createFolder` throws on an already-existing folder rather than being a no-op - each level is
+   checked first, and existing-folder races are treated as success rather than re-thrown.
+
+The target folder defaults to the vault root and is changed via `pickFolder` (`folder-suggest-modal.ts`,
+mirroring `file-suggest-modal.ts`'s `pickFile`/`FileSuggestModal` pattern but over `TFolder` instead of
+`TFile`).
 
 ## Versioning
 

@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import {
     loadTracker, isRunning, getRunningEntry, getDuration, getTotalDuration,
     startNewEntry, startSubEntry, endRunningEntry, removeEntry, formatDuration,
-    latestEntryTime,
+    latestEntryTime, flattenEntries, createTableSection,
 } from "../src/model";
 import { Entry, Tracker } from "../src/types";
+import { TimeTrackerSettings } from "../src/settings";
 
 test("loadTracker parses valid JSON", () => {
     const tracker = loadTracker('{"dispType":"default","currTask":"","project":"P","client":"C","entries":[]}');
@@ -130,4 +131,46 @@ test("latestEntryTime returns 0 when nothing has finished yet", () => {
     const entries: Entry[] = [{ name: "a", startTime: 0, endTime: null, subEntries: null }];
     assert.equal(latestEntryTime(entries), 0);
     assert.equal(latestEntryTime([]), 0);
+});
+
+test("flattenEntries returns a single depth-0 row for a plain leaf entry", () => {
+    const entry: Entry = { name: "task", startTime: 100, endTime: 200, subEntries: null };
+    const rows = flattenEntries(entry);
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0], { name: "task", startTime: 100, endTime: 200, durationSeconds: 100, depth: 0 });
+});
+
+test("flattenEntries recurses into subEntries, incrementing depth, parent duration is the sum", () => {
+    const entry: Entry = {
+        name: "task", startTime: null, endTime: null, subEntries: [
+            { name: "Part 1", startTime: 0, endTime: 10, subEntries: null },
+            { name: "Part 2", startTime: 100, endTime: 130, subEntries: null },
+        ]
+    };
+    const rows = flattenEntries(entry);
+    assert.equal(rows.length, 3);
+    assert.equal(rows[0].name, "task");
+    assert.equal(rows[0].depth, 0);
+    assert.equal(rows[0].startTime, null);
+    assert.equal(rows[0].durationSeconds, 40); // 10s + 30s
+    assert.equal(rows[1].name, "Part 1");
+    assert.equal(rows[1].depth, 1);
+    assert.equal(rows[1].durationSeconds, 10);
+    assert.equal(rows[2].name, "Part 2");
+    assert.equal(rows[2].depth, 1);
+    assert.equal(rows[2].durationSeconds, 30);
+});
+
+test("createTableSection hides the duration for a still-running leaf, shows it for a finished parent", () => {
+    const settings = { timestampFormat: "YY-MM-DD hh:mm:ss" } as TimeTrackerSettings;
+
+    const runningLeaf: Entry = { name: "task", startTime: 1000, endTime: null, subEntries: null };
+    assert.equal(createTableSection(runningLeaf, settings)[0][3], "");
+
+    const finishedParent: Entry = {
+        name: "task", startTime: null, endTime: null, subEntries: [
+            { name: "Part 1", startTime: 0, endTime: 10, subEntries: null },
+        ]
+    };
+    assert.equal(createTableSection(finishedParent, settings)[0][3], "10s");
 });

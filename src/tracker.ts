@@ -1,10 +1,10 @@
-import { moment, App, MarkdownSectionInformation, ButtonComponent, TextComponent, TFile } from "obsidian";
+import { moment, App, MarkdownSectionInformation, ButtonComponent, TextComponent, TFile, TFolder, Notice } from "obsidian";
 import { TimeTrackerSettings } from "./settings";
-import { Tracker, Entry } from "./types";
+import { Tracker, Entry, TrackerRow } from "./types";
 import {
     loadTracker, isRunning, getRunningEntry, getDuration, getTotalDuration,
     startNewEntry, startSubEntry, endRunningEntry, removeEntry,
-    formatTimestamp, formatDuration, createTrackerTable, createCsv,
+    formatTimestamp, formatDuration, createTrackerTable, createCsv, flattenEntries,
 } from "./model";
 import { stopAll, readAll } from "./files";
 import { allTracksFromSections, pickProjectFiles } from "./report";
@@ -12,6 +12,9 @@ import { findProjects, daySumSeconds, toName } from "./report-logic";
 import { parseDate } from "./dateutil";
 import { ConfirmModal } from "./confirm-modal";
 import { onTick } from "./ticker";
+import { renderTemplaterFile } from "./templater";
+import { getMarkdownFilesInFolder, pickFile } from "./file-suggest-modal";
+import type { InternalApi } from "./api";
 
 export { loadTracker };
 
@@ -66,6 +69,44 @@ function debounced(fn: () => Promise<void>, delayMs: number): () => void {
             run();
         }, delayMs);
     };
+}
+
+// Uses the configured Templater template if set, stashing this tracker's
+// flattened rows via the plugin's api first (see api.ts's "stash and
+// consume" methods) - falls back to the given built-in formatter on any
+// failure (Templater missing, template missing, template throws), never
+// leaving the user with an empty clipboard. If the setting points at a
+// folder rather than a single file, prompts to pick which template file in
+// it to use; returns null (rather than falling back) if that picker is
+// cancelled, so the caller can leave the clipboard untouched instead of
+// copying something the user didn't ask for.
+async function buildTrackerOutput(tracker: Tracker, app: App, templatePath: string, fallback: () => string): Promise<string | null> {
+    if (!templatePath)
+        return fallback();
+
+    try {
+        let resolvedPath = templatePath;
+        const abstractFile = app.vault.getAbstractFileByPath(templatePath);
+        if (abstractFile instanceof TFolder) {
+            const picked = await pickFile(app, getMarkdownFilesInFolder(abstractFile));
+            if (!picked)
+                return null;
+            resolvedPath = picked.path;
+        }
+
+        const rows: TrackerRow[] = [];
+        for (const entry of tracker.entries)
+            rows.push(...flattenEntries(entry));
+        const api = (app as any).plugins?.plugins?.["time-tracker"]?.api as InternalApi | undefined;
+        api?.stashTrackerRows(rows);
+        const rendered = await renderTemplaterFile(app, resolvedPath);
+        if (rendered !== null)
+            return rendered;
+    } catch (e) {
+        console.error("Time Tracker: tracker template failed", e);
+    }
+    new Notice(`Time Tracker: couldn't use the template ("${templatePath}") - falling back to the built-in format. Check that Templater is installed and the path is correct.`);
+    return fallback();
 }
 
 // Rendered instead of an interactive tracker when loadTracker couldn't make
@@ -201,10 +242,20 @@ export function displayTrackerDefault(tracker: Tracker, element: HTMLElement, ge
         let buttons = element.createEl("div", { cls: "time-tracker-bottom" });
         new ButtonComponent(buttons)
             .setButtonText("Copy as table")
-            .onClick(() => navigator.clipboard.writeText(createTrackerTable(tracker, settings)));
+            .onClick(async () => {
+                const text = await buildTrackerOutput(
+                    tracker, app, settings.trackerTableTemplatePath, () => createTrackerTable(tracker, settings));
+                if (text !== null)
+                    navigator.clipboard.writeText(text);
+            });
         new ButtonComponent(buttons)
             .setButtonText("Copy as CSV")
-            .onClick(() => navigator.clipboard.writeText(createCsv(tracker, settings)));
+            .onClick(async () => {
+                const text = await buildTrackerOutput(
+                    tracker, app, settings.trackerCsvTemplatePath, () => createCsv(tracker, settings));
+                if (text !== null)
+                    navigator.clipboard.writeText(text);
+            });
     }
 
     setCountdownValues(tracker, current, total, currentDiv);

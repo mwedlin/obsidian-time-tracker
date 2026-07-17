@@ -2,7 +2,7 @@
 // can be unit-tested directly under plain Node (see tests/model.test.ts).
 
 import moment from "moment";
-import { Entry, Tracker } from "./types";
+import { Entry, Tracker, TrackerRow } from "./types";
 import { TimeTrackerSettings } from "./settings";
 import { escapeCsvField, escapeMarkdownCell } from "./text-escape";
 
@@ -169,17 +169,36 @@ export function formatDuration(totalTime: number): string {
     return ret;
 }
 
-export function createTableSection(entry: Entry, settings: TimeTrackerSettings): string[][] {
-    let ret: string[][] = [[
-        entry.name,
-        entry.startTime ? formatTimestamp(entry.startTime, settings.timestampFormat) : "",
-        entry.endTime ? formatTimestamp(entry.endTime, settings.timestampFormat) : "",
-        entry.endTime || entry.subEntries ? formatDuration(getDuration(entry)) : ""]];
+// Flatten an entry (and its subEntries, recursively) into raw rows - no
+// formatting, no settings dependency - exposed via the plugin's public API
+// (api.ts) for Templater templates to consume instead of the hardcoded
+// createTrackerTable/createCsv rendering. durationSeconds is always computed
+// (via getDuration, which live-ticks a still-running leaf against "now"); a
+// row's startTime/endTime tell a consumer whether that number is "final" -
+// a still-running leaf has startTime set but endTime null, while a parent
+// entry with subEntries has both null (see startSubEntry in this file).
+export function flattenEntries(entry: Entry, depth: number = 0): TrackerRow[] {
+    let ret: TrackerRow[] = [{
+        name: entry.name,
+        startTime: entry.startTime ?? null,
+        endTime: entry.endTime ?? null,
+        durationSeconds: Math.round(getDuration(entry) / 1000),
+        depth,
+    }];
     if (entry.subEntries) {
         for (let sub of entry.subEntries)
-            ret.push(...createTableSection(sub, settings));
+            ret.push(...flattenEntries(sub, depth + 1));
     }
     return ret;
+}
+
+export function createTableSection(entry: Entry, settings: TimeTrackerSettings): string[][] {
+    return flattenEntries(entry).map(row => [
+        row.name,
+        row.startTime ? formatTimestamp(row.startTime, settings.timestampFormat) : "",
+        row.endTime ? formatTimestamp(row.endTime, settings.timestampFormat) : "",
+        (row.endTime !== null || row.startTime === null) ? formatDuration(row.durationSeconds * 1000) : "",
+    ]);
 }
 
 export function createCsv(tracker: Tracker, settings: TimeTrackerSettings): string {

@@ -5,13 +5,20 @@ import { displayTracker, displayParseError, loadTracker } from "./tracker";
 import { stopAll } from "./files";
 import { ReportModal, startFavorite } from "./report";
 import { favoriteCommandId, favoriteCommandName } from "./favorites";
+import { createApi, TimeTrackerApi } from "./api";
+import { InstallTemplateKitModal } from "./template-kit-installer";
 
 export default class TimeTrackerPlugin extends Plugin {
 
 	settings: TimeTrackerSettings;
+	// The plugin's public API, reachable externally at
+	// app.plugins.plugins["time-tracker"].api - see api.ts.
+	api: TimeTrackerApi;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
+
+		this.api = createApi(this.app);
 
 		this.addSettingTab(new TimeTrackerSettingsTab(this.app, this));
 
@@ -66,6 +73,14 @@ export default class TimeTrackerPlugin extends Plugin {
 				};
 
 				new ReportModal(this.app, this.settings, onSubmit).open();
+			}
+		});
+
+		this.addCommand({
+			id: `install-template-kit`,
+			name: `Install template kit`,
+			callback: () => {
+				new InstallTemplateKitModal(this.app).open();
 			}
 		});
 

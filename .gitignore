@@ -24,3 +24,10 @@ workspace.json
 
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
+
+# Personal planning notes, not for the public repo
+MONETIZATION.md
+
+# Local dev config (e.g. OBSIDIAN_REST_API_KEY for esbuild.config.mjs's
+# reloadObsidian) - never commit real credentials.
+.env
