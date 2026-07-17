@@ -1,3 +1,5 @@
+import { Favorite } from "./favorites";
+
 export const defaultSettings: TimeTrackerSettings = {
     timestampFormat: "YY-MM-DD hh:mm:ss",
     csvDelimiter: ",",
@@ -5,6 +7,7 @@ export const defaultSettings: TimeTrackerSettings = {
     timerUpdateSeconds: 5,
     statusUpdateSeconds: 1,
     todayUpdateSeconds: 30,
+    favoriteProjects: [],
 };
 
 export interface TimeTrackerSettings {
@@ -18,5 +21,10 @@ export interface TimeTrackerSettings {
     timerUpdateSeconds: number;  // the per-note tracker's Current/Total timer
     statusUpdateSeconds: number; // the status widget's live "Today" timer
     todayUpdateSeconds: number;  // the today widget's live numbers
+    // Each entry gets its own "Start <name>" command (see favorites.ts),
+    // e.g. for triggering from a StreamDeck via the Local REST API community
+    // plugin. Adding/removing favorites requires reloading the plugin, since
+    // commands are registered once at onload.
+    favoriteProjects: Favorite[];
 
 }

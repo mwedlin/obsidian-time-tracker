@@ -3,7 +3,8 @@ import { defaultSettings, TimeTrackerSettings } from "./settings";
 import { TimeTrackerSettingsTab } from "./settings-tab";
 import { displayTracker, displayParseError, loadTracker } from "./tracker";
 import { stopAll } from "./files";
-import { ReportModal } from "./report";
+import { ReportModal, startFavorite } from "./report";
+import { favoriteCommandId, favoriteCommandName } from "./favorites";
 
 export default class TimeTrackerPlugin extends Plugin {
 
@@ -67,6 +68,16 @@ export default class TimeTrackerPlugin extends Plugin {
 				new ReportModal(this.app, this.settings, onSubmit).open();
 			}
 		});
+
+		for (const favorite of this.settings.favoriteProjects) {
+			this.addCommand({
+				id: favoriteCommandId(favorite),
+				name: favoriteCommandName(favorite),
+				callback: async () => {
+					await startFavorite(this.app, favorite.project, favorite.client);
+				}
+			});
+		}
 
 		if (this.settings.debugMode) {
 			this.addCommand({

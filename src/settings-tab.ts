@@ -1,6 +1,8 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import TimeTrackerPlugin from "./main";
 import { defaultSettings, TimeTrackerSettings } from "./settings";
+import { favoriteCommandName } from "./favorites";
+import { toName } from "./report-logic";
 
 type UpdateIntervalKey = keyof Pick<TimeTrackerSettings, "timerUpdateSeconds" | "statusUpdateSeconds" | "todayUpdateSeconds">;
 
@@ -55,6 +57,50 @@ export class TimeTrackerSettingsTab extends PluginSettingTab {
             "Today widget update interval (seconds)",
             "How often the today widget's live numbers refresh.",
             "todayUpdateSeconds");
+
+        this.containerEl.createEl("h3", { text: "Favorite projects" });
+        this.containerEl.createEl("p", {
+            text: "Each favorite gets its own \"Start <name>\" command in the command palette - and " +
+                "anything else that can trigger an Obsidian command, like a StreamDeck through the Local " +
+                "REST API community plugin - to start that project/client's tracker without opening its " +
+                "note. If the same project/client exists in more than one note, it starts whichever " +
+                "currently has a running timer, or otherwise whichever has the most recent completed " +
+                "entry. Adding/removing favorites requires reloading the plugin to take effect.",
+        });
+
+        for (const favorite of this.plugin.settings.favoriteProjects) {
+            new Setting(this.containerEl)
+                .setName(toName(favorite.project, favorite.client))
+                .setDesc(`Command: "${favoriteCommandName(favorite)}"`)
+                .addButton(b => b
+                    .setIcon("lucide-trash")
+                    .setTooltip("Remove")
+                    .onClick(async () => {
+                        this.plugin.settings.favoriteProjects = this.plugin.settings.favoriteProjects.filter(f => f !== favorite);
+                        await this.plugin.saveSettings();
+                        this.display();
+                    }));
+        }
+
+        let newProject = "";
+        let newClient = "";
+        new Setting(this.containerEl)
+            .setName("Add a favorite")
+            .addText(t => t.setPlaceholder("Project").onChange(v => newProject = v))
+            .addText(t => t.setPlaceholder("Client").onChange(v => newClient = v))
+            .addButton(b => b
+                .setButtonText("Add")
+                .setCta()
+                .onClick(async () => {
+                    if (!newProject && !newClient)
+                        return;
+                    const exists = this.plugin.settings.favoriteProjects.some(f => f.project === newProject && f.client === newClient);
+                    if (exists)
+                        return;
+                    this.plugin.settings.favoriteProjects.push({ project: newProject, client: newClient });
+                    await this.plugin.saveSettings();
+                    this.display();
+                }));
 
         new Setting(this.containerEl)
             .setName("Enable debug command")

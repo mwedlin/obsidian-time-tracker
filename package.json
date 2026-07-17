@@ -1,12 +1,12 @@
 {
 	"name": "time-tracker",
-	"version": "1.1.1",
+	"version": "1.1.2",
 	"description": "Multi-purpose time trackers for your notes!",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-		"test": "node --import tsx --test tests/model.test.ts tests/report-logic.test.ts tests/text-escape.test.ts",
+		"test": "node --import tsx --test tests/model.test.ts tests/report-logic.test.ts tests/text-escape.test.ts tests/favorites.test.ts",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"prepare": "husky"
 	},

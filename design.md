@@ -260,17 +260,20 @@ that matters most: starting a new timer (which stops the old one first, then wri
 separate `vault.modify` writes, two debounced-together `refresh()` triggers, each of which used to scan
 twice).
 
-**Linking a project name to a note** (`pickProjectFiles` in `report.ts`, `createNoteLink` in `tracker.ts`):
-a project/client pair can have tracker blocks in several different notes, so `pickProjectFiles` picks one
-per project name, from an already-fetched `FileSection[]` (no extra vault scan — `displayStatus`/
-`displayToday` already have one from their own `readAll(app)` call, and both re-scan every tick, so
-avoiding a second scan on top matters here more than it would for a one-off call): whichever section has
-a currently running timer wins outright; otherwise, whichever has the most recent already-stopped entry
-(`latestEntryTime` in `model.ts`, the max `endTime` across an entry list's leaves/subEntries, ignoring
-still-running ones) wins. `createNoteLink` renders an `<a class="internal-link" href="...">` — that class
-is also what makes Obsidian's own Page Preview hover-popup work on it — and opens the actual `TFile`
-directly via `app.workspace.getLeaf(ctrlOrCmd).openFile(file)` on click, rather than resolving a link path,
-since the file is already in hand.
+**Picking which note represents a project** (`bestSectionPerName` in `report.ts`, shared by
+`pickProjectFiles`, `pickProjectSection`, and `startFavorite`): a project/client pair can have tracker
+blocks in several different notes, so this picks one per project name, from an already-fetched
+`FileSection[]` (no extra vault scan — `displayStatus`/`displayToday` already have one from their own
+`readAll(app)` call, and both re-scan on every vault change, so avoiding a second scan on top matters here
+more than it would for a one-off call): whichever section has a currently running timer wins outright;
+otherwise, whichever has the most recent already-stopped entry (`latestEntryTime` in `model.ts`, the max
+`endTime` across an entry list's leaves/subEntries, ignoring still-running ones) wins.
+`pickProjectFiles`/`createNoteLink` (`tracker.ts`) use this to link `status`/`today`'s project names to a
+note: `createNoteLink` renders an `<a class="internal-link" href="...">` — that class is also what makes
+Obsidian's own Page Preview hover-popup work on it — and opens the actual `TFile` directly via
+`app.workspace.getLeaf(ctrlOrCmd).openFile(file)` on click, rather than resolving a link path, since the
+file is already in hand. `pickProjectSection` (returning the section itself, not just its file) is what
+lets `startFavorite` (see Commands below) find and mutate the right tracker without a rendered view.
 
 `dispType: "legacy"` has been removed entirely (was a recognized but unimplemented no-op branch).
 
@@ -357,7 +360,23 @@ than reading `this.app` from a non-method context (that was one of the bugs in `
 | Insert Time Tracker for logged times today | inserts a `dispType:"today"` block |
 | Stop all timers | calls `stopAll(app)` directly, no UI |
 | Report | opens `ReportModal` |
+| Start &lt;favorite&gt; | one per configured favorite (see below), calls `startFavorite(app, project, client)` |
 | Debug files | dev-only scratch command, only registered when Settings → "Enable debug command" is on (improvement #6) |
+
+**Favorites** (`src/favorites.ts`, `startFavorite` in `report.ts`): each entry in
+`settings.favoriteProjects` gets its own command, registered at `onload` — `favoriteCommandName` for the
+display name ("Start Project 4/Client 4"), `favoriteCommandId` for a stable id (a slugified version of the
+same name, e.g. `start-project-4-client-4`; stable across reloads since it's derived from the favorite's
+own text rather than its position in the list). This was built specifically so external tools that can
+trigger an Obsidian command — a StreamDeck via the Local REST API community plugin's
+`POST /commands/{id}`, for one — can start a *specific* tracker without opening its note; no existing
+command took a project as a parameter, and the REST API's command-execution endpoint doesn't pass
+arguments through to a command's callback, so parameterizing an existing command wasn't an option.
+`startFavorite` calls `stopAll` first (same vault-wide invariant as the Start button), then uses
+`pickProjectSection` to find the right block (same running-wins/most-recent-wins strategy as linking a
+project to a note, above) and starts a new entry in it. Deliberately doesn't create a new tracker block if
+none exists yet for that project/client — no good place to insert one without a cursor position — and
+surfaces a `Notice` instead of guessing.
 
 ## Settings (`src/settings.ts`, `src/settings-tab.ts`)
 
@@ -370,6 +389,9 @@ than reading `this.app` from a non-method context (that was one of the bugs in `
   the `today` widget's live numbers each refresh (fed straight into their respective `onTick(...)` calls in
   `tracker.ts` as `intervalMs`, ×1000). The settings tab validates each as a positive number, falling back
   to its default on anything else (empty, non-numeric, zero or negative).
+- `favoriteProjects` (`Favorite[]`, default `[]`) — see the Favorites entry under Commands above. The
+  settings tab lets you add a project/client pair (skipping exact duplicates) and remove existing ones;
+  like `debugMode`, changes need a plugin reload to take effect.
 
 ## External/optional integrations
 

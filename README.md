@@ -26,6 +26,9 @@ Two more commands insert small, vault-wide widgets rather than a full tracker �
 ## Stopping everything
 `Time Tracker: Stop all timers` stops whichever timer is currently running, from anywhere — no need to go find the note it's in.
 
+## Favorite projects — starting a specific timer from outside Obsidian
+Add a project/client pair as a "favorite" in Settings and it gets its own command, `Time Tracker: Start <name>`, that starts that project's timer from anywhere without opening its note — stopping whatever else is running first, same as pressing Start normally. This is meant for triggering from outside Obsidian: a StreamDeck button, for instance, can hit it through the [Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api) community plugin's `POST /commands/{id}` endpoint (the command's id is a slug of its name, e.g. `time-tracker:start-project-4-client-4`), or you can just run it from the command palette like any other command. If the same project/client has trackers in more than one note, it starts whichever currently has the running timer, or otherwise whichever has the most recent completed entry — same as the note links in the status/today widgets above. It won't create a brand-new tracker if one doesn't exist yet for that pair; add/remove favorites in Settings, and reload the plugin afterward for the commands to update.
+
 ## Generating a report
 Place your cursor where you want the report to appear in the current note, then open the command palette and execute the `Time Tracker: Report` command. Choose a start and end date (typed in your configured format, or as natural language if Natural Language Dates is installed) — "Check dates" lets you confirm they were parsed correctly first. Hit **Append table at cursor** and a Markdown table of hours logged per project, per day, is written directly into the note at the cursor position.
 
@@ -38,6 +41,7 @@ A few things worth knowing about how the report is put together:
 - **Timestamp Display Format** — the [moment.js](https://momentjs.com/docs/#/parsing/string-format/) format used to display and strictly parse timestamps (default `YY-MM-DD hh:mm:ss`).
 - **CSV Delimiter** — the character used to separate fields when copying a tracker as CSV (default `,`; useful to change to `;` in locales where `,` is a decimal separator).
 - **Timer display update interval**, **Status widget update interval**, **Today widget update interval** — how often (in seconds) the default view's Current/Total timer, the status widget's live "Today" timer, and the today widget's live numbers each refresh (defaults `5`, `1`, `30`). Lower for smoother live updates, higher if you'd rather trade that off for fewer background refreshes.
+- **Favorite projects** — add/remove the project/client pairs that get their own "Start" command (see above). Changes need a plugin reload to take effect.
 
 # 👀 What it does
 A time tracker is really just a special code block that stores information about the times you pressed the Start and End buttons on. Since time is tracked solely through timestamps, you can switch notes, close Obsidian or even shut down your device completely while the tracker is running! Once you come back, your time tracker will still be running.
@@ -49,6 +53,7 @@ Since it's just JSON in your note, nothing stops you from editing it by hand —
 # 🧩 Works well with
 - **[Natural Language Dates](https://github.com/argenos/nldates-obsidian)** (optional) — install it to type things like "next monday" or "yesterday at 3pm" wherever this plugin asks for a date, instead of the strict timestamp format.
 - **[Buttons](https://github.com/shabegom/buttons)** (optional) — since `Stop all timers` is a regular command, you can wire a Buttons block to it for a one-tap "stop everything" button on a dashboard note.
+- **[Local REST API](https://github.com/coddingtonbear/obsidian-local-rest-api)** (optional) — since every command here (including per-favorite "Start" commands) is a regular Obsidian command, it can be triggered remotely through this plugin's REST endpoints — handy for a StreamDeck or similar.
 
 # 🛣️ Roadmap
 Time Tracker is still in its early stages! Use it at your own risk. I make no guarantees at all and I have limited time for support issues. With that said, I have used it extensibly for some years now and I like it a lot. No promises, but send me an email to mwe@wewid.se if you have any questions or suggestions. Or just want to encourage me to carry on.

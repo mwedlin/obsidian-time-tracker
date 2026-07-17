@@ -1,8 +1,8 @@
-import { App, Modal, ButtonComponent, TextComponent, TFile } from "obsidian";
+import { App, Modal, ButtonComponent, TextComponent, TFile, Notice } from "obsidian";
 import { TimeTrackerSettings } from "./settings";
 import { Entry } from "./types";
-import { readAll, FileSection } from "./files";
-import { isRunning, latestEntryTime } from "./model";
+import { readAll, FileSection, stopAll, writeTrackerSection } from "./files";
+import { isRunning, latestEntryTime, startNewEntry } from "./model";
 import { isWithin, toName, createMarkdownTable } from "./report-logic";
 import { parseDate } from "./dateutil";
 
@@ -44,15 +44,13 @@ export function allTracksFromSections(sections: FileSection[], start: number, en
     return flattenTracks(sections, start, end);
 }
 
-// For each project/client name present in sections, pick the single note
+// For each project/client name present in sections, pick the single section
 // that best represents it: the one with a currently running timer, if any,
-// otherwise whichever has the most recent (already-stopped) entry. Takes an
-// already-fetched section list rather than scanning the vault itself, since
-// callers (displayStatus/displayToday) already have one from their own
-// readAll(app) call and re-scanning again on top would be wasteful - they
-// already tick every second.
-export function pickProjectFiles(sections: FileSection[]): Map<string, TFile> {
-    const best = new Map<string, { file: TFile; running: boolean; latest: number }>();
+// otherwise whichever has the most recent (already-stopped) entry. Shared by
+// pickProjectFiles (displayStatus/displayToday's note links) and
+// pickProjectSection (startFavorite, below).
+function bestSectionPerName(sections: FileSection[]): Map<string, FileSection> {
+    const best = new Map<string, { section: FileSection; running: boolean; latest: number }>();
 
     for (const section of sections) {
         const name = toName(section.tracker.project, section.tracker.client);
@@ -63,14 +61,52 @@ export function pickProjectFiles(sections: FileSection[]): Map<string, TFile> {
         if (!current
             || (running && !current.running)
             || (running === current.running && latest > current.latest)) {
-            best.set(name, { file: section.file, running, latest });
+            best.set(name, { section, running, latest });
         }
     }
 
-    const result = new Map<string, TFile>();
+    const result = new Map<string, FileSection>();
     for (const [name, entry] of best)
-        result.set(name, entry.file);
+        result.set(name, entry.section);
     return result;
+}
+
+// Takes an already-fetched section list rather than scanning the vault
+// itself, since callers (displayStatus/displayToday) already have one from
+// their own readAll(app) call and re-scanning again on top would be wasteful
+// - they already tick every second.
+export function pickProjectFiles(sections: FileSection[]): Map<string, TFile> {
+    const result = new Map<string, TFile>();
+    for (const [name, section] of bestSectionPerName(sections))
+        result.set(name, section.file);
+    return result;
+}
+
+export function pickProjectSection(sections: FileSection[], name: string): FileSection | undefined {
+    return bestSectionPerName(sections).get(name);
+}
+
+// Starts tracking a configured "favorite" project/client pair: stops
+// whatever's running vault-wide (same invariant as the Start button), then
+// finds the section that best represents this project/client (same
+// running-wins/most-recent-wins strategy as pickProjectSection above) and
+// starts a new entry in it. Used by main.ts's per-favorite commands, so a
+// StreamDeck (or anything else driving Obsidian's command palette/REST API)
+// can start a specific, already-existing tracker without opening its note.
+// Deliberately doesn't create a new tracker block if none exists yet for this
+// pair - there's no good place to insert one without a cursor position, so
+// it surfaces a Notice instead of guessing.
+export async function startFavorite(app: App, project: string, client: string): Promise<void> {
+    const name = toName(project, client);
+    await stopAll(app);
+    const sections = await readAll(app);
+    const section = pickProjectSection(sections, name);
+    if (!section) {
+        new Notice(`Time Tracker: no existing tracker found for "${name}"`);
+        return;
+    }
+    startNewEntry(section.tracker, "", project, client);
+    await writeTrackerSection(app, section);
 }
 
 // Report modal: lets the user pick a date range and appends a markdown table

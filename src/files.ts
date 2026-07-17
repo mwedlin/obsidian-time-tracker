@@ -47,6 +47,22 @@ export async function readAll(app: App): Promise<FileSection[]> {
     return result;
 }
 
+// Write a section's (possibly mutated) tracker back into its file, splicing
+// by line position - the same anchor readAll() uses, rather than needing a
+// live rendered view's MarkdownSectionInformation (saveTracker in tracker.ts
+// needs one of those; this is for callers, like stopAll and startFavorite,
+// that only have a FileSection from a vault-wide scan).
+export async function writeTrackerSection(app: App, section: FileSection): Promise<void> {
+    const content = await app.vault.read(section.file);
+    const lines = content.split("\n");
+    const newLines = [
+        ...lines.slice(0, section.lineStart + 1),
+        JSON.stringify(section.tracker),
+        ...lines.slice(section.lineEnd),
+    ];
+    await app.vault.modify(section.file, newLines.join("\n"));
+}
+
 // Stop all active counters, vault-wide.
 export async function stopAll(app: App): Promise<void> {
     let allStopped = false;
@@ -56,16 +72,7 @@ export async function stopAll(app: App): Promise<void> {
         for (const section of sections) {
             if (isRunning(section.tracker)) {
                 endRunningEntry(section.tracker);
-
-                const content = await app.vault.read(section.file);
-                const lines = content.split("\n");
-                const newLines = [
-                    ...lines.slice(0, section.lineStart + 1),
-                    JSON.stringify(section.tracker),
-                    ...lines.slice(section.lineEnd),
-                ];
-                await app.vault.modify(section.file, newLines.join("\n"));
-
+                await writeTrackerSection(app, section);
                 allStopped = false;
                 break; // file content changed under us; re-scan from scratch
             }
