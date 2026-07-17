@@ -1,75 +1,72 @@
-import { moment, App, MarkdownSectionInformation, ButtonComponent, TextComponent, obsidianApp } from "obsidian";
-// import { loadTracker } from "src/tracker";
-import { Tracker, loadTracker, isRunning, endRunningEntry } from "./tracker";
+import { App, TFile } from "obsidian";
+import { Tracker } from "./types";
+import { loadTracker, isRunning, endRunningEntry } from "./model";
 
 export interface FileSection {
     file: TFile;
-    startPos: Number;
-    endPos: Number;
+    lineStart: number; // line of the opening ```time-tracker fence
+    lineEnd: number;   // line of the closing ``` fence
     tracker: Tracker;
 }
 
-// Read all time-tracker sections in all files.
-export async function readAll(): FileSection[] {
-    var result: FileSection[] = [];
-    const files :String[]  = this.app.vault.getMarkdownFiles()
+// Read all time-tracker sections in all files, using Obsidian's own parsed
+// metadata (rather than scanning file text for the fence marker) so a
+// ```time-tracker string appearing outside an actual code block can't be
+// mistaken for one.
+export async function readAll(app: App): Promise<FileSection[]> {
+    const result: FileSection[] = [];
 
-    for (let i = 0; i < files.length; i++) {
-        // console.log("File: " + files[i].path);
-        const content :String = await this.app.vault.cachedRead(files[i])
-        var startBlock;
-        var endBlock;
-        var nextBlock = content.indexOf("```time-tracker");
-        while (nextBlock != -1) {
-            // console.log("nextBlock: %d", nextBlock)
-            startBlock = content.indexOf("\n", nextBlock) + 1;
-            endBlock = content.indexOf("\n```", startBlock-1);
-            // console.log("Start: " + startBlock + "End: " + endBlock);
-            if (endBlock > startBlock) {
-                // console.log("Content: " + content.slice(startBlock, endBlock));
-                var res: FileSection = {
-                    file: files[i],
-                    startPos: startBlock,
-                    endPos: endBlock,
-                    tracker: loadTracker(content.slice(startBlock, endBlock))
-                };
-                result.push(res);
-            };
-            nextBlock = content.indexOf("```time-tracker", endBlock+4); // Find start of next block
-            // console.log("Next: " + nextBlock)
-        };
-    };
+    for (const file of app.vault.getMarkdownFiles()) {
+        const cache = app.metadataCache.getFileCache(file);
+        if (!cache?.sections)
+            continue;
+
+        const content = await app.vault.cachedRead(file);
+        const lines = content.split("\n");
+
+        for (const section of cache.sections) {
+            if (section.type !== "code")
+                continue;
+
+            const lineStart = section.position.start.line;
+            const lineEnd = section.position.end.line;
+            if (lines[lineStart].trim() !== "```time-tracker")
+                continue;
+
+            const json = lines.slice(lineStart + 1, lineEnd).join("\n");
+            result.push({
+                file,
+                lineStart,
+                lineEnd,
+                tracker: loadTracker(json),
+            });
+        }
+    }
     return result;
 }
 
-// Stop all active counters.
-export async function stopAll(): void {
-    // console.log("Stopping all timers.")
-    var allStopped: Boolean = false;
+// Stop all active counters, vault-wide.
+export async function stopAll(app: App): Promise<void> {
+    let allStopped = false;
     while (!allStopped) {
-        const sections = await readAll();
+        const sections = await readAll(app);
         allStopped = true;
-        for (let i = 0; i<sections.length; i++) {
-            if (isRunning(sections[i].tracker)) {
-                // console.log("Stopping " + sections[i].file.path + " at " + sections[i].startPos);
-                const content = await this.app.vault.read(sections[i].file);
-                // console.log("\n\nStart text:\n" + content)
-                endRunningEntry(sections[i].tracker);
-                // console.log("\nNew content pre:\n" + content.slice(0, sections[i].startPos) + "\nTracker:\n" + JSON.stringify(sections[i].tracker) + "\nPost:\n" + content.slice(sections[i].endPos));
-                if (!content.slice(sections[i].endPos+1, sections[i].endPos+4) == "---") { // File has changed
-                    // console.log("File changed: " + content.slice(sections[i].endPos+1, sections[i].endPos+4));
-                    allStopped = false;
-                    break; // Have to reread all sections to get the positions right again
-                };
-                const newcontent = content.slice(0, sections[i].startPos) + 
-                                   JSON.stringify(sections[i].tracker) +
-                                   content.slice(sections[i].endPos);
-                await this.app.vault.modify(sections[i].file, newcontent);
+        for (const section of sections) {
+            if (isRunning(section.tracker)) {
+                endRunningEntry(section.tracker);
+
+                const content = await app.vault.read(section.file);
+                const lines = content.split("\n");
+                const newLines = [
+                    ...lines.slice(0, section.lineStart + 1),
+                    JSON.stringify(section.tracker),
+                    ...lines.slice(section.lineEnd),
+                ];
+                await app.vault.modify(section.file, newLines.join("\n"));
+
                 allStopped = false;
-                break; // Have to reread all sections to get the positions right again
-            } else {
-                // console.log(sections[i].file.path + " at " + sections[i].startPos + " is not running.");
+                break; // file content changed under us; re-scan from scratch
             }
-        };
-    };
+        }
+    }
 }

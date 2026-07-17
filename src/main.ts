@@ -1,10 +1,9 @@
-import { Plugin } from "obsidian";
+import { Editor, MarkdownView, Plugin } from "obsidian";
 import { defaultSettings, TimeTrackerSettings } from "./settings";
 import { TimeTrackerSettingsTab } from "./settings-tab";
 import { displayTracker, loadTracker } from "./tracker";
-import { fileSection, readAll, stopAll } from "./files"
-import { ReportModal } from "./report"
-import { BlockList } from "net";
+import { stopAll } from "./files";
+import { ReportModal } from "./report";
 
 export default class TimeTrackerPlugin extends Plugin {
 
@@ -18,48 +17,46 @@ export default class TimeTrackerPlugin extends Plugin {
 		this.registerMarkdownCodeBlockProcessor("time-tracker", (s, e, i) => {
 			let tracker = loadTracker(s);
 			e.empty();
-			displayTracker(tracker, e, () => i.getSectionInfo(e), this.settings);
+			displayTracker(tracker, e, () => i.getSectionInfo(e), this.settings, this.app);
 		});
 
 		this.addCommand({
 			id: `insert`,
 			name: `Insert Time Tracker`,
-			editorCallback: (e, _) => {
-				e.replaceSelection('```time-tracker\n{"dispType":"default","currTask":"","project":"CUAS","client":"","entries": []}\n```\n');
+			editorCallback: (editor: Editor) => {
+				editor.replaceSelection('```time-tracker\n{"dispType":"default","currTask":"","project":"","client":"","entries": []}\n```\n');
 			}
 		});
 
 		this.addCommand({
 			id: `insert status`,
 			name: `Insert Time Tracker Status`,
-			editorCallback: (e, _) => {
-				e.replaceSelection('```time-tracker\n{"dispType":"status"}\n```\n');
+			editorCallback: (editor: Editor) => {
+				editor.replaceSelection('```time-tracker\n{"dispType":"status"}\n```\n');
 			}
 		});
 
 		this.addCommand({
 			id: `insert today status`,
 			name: `Insert Time Tracker for logged times today`,
-			editorCallback: (e, _) => {
-				e.replaceSelection('```time-tracker\n{"dispType":"today"}\n```\n');
+			editorCallback: (editor: Editor) => {
+				editor.replaceSelection('```time-tracker\n{"dispType":"today"}\n```\n');
 			}
 		});
 
 		this.addCommand({
 			id: `stop`,
 			name: `Stop all timers`,
-			editorCallback: (e, _) => {
-				stopAll();
+			callback: async () => {
+				await stopAll(this.app);
 			}
 		});
 
 		this.addCommand({
 			id: `Report`,
 			name: `Report times`,
-			editorCallback: async (editor: Editor) => {
-				// const selText = editor.getSelection();
-
-				const onSubmit = (text: String) => {
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				const onSubmit = (text: string) => {
 					editor.replaceSelection(text);
 				};
 
@@ -67,19 +64,15 @@ export default class TimeTrackerPlugin extends Plugin {
 			}
 		});
 
-		this.addCommand({
-			id: `debug`,
-			name: `Debug files`,
-			callback: async (e, _) => {
-				new ReportModal(this.app).open();
-				// var allblocks = await readAll();
-				// await stopAll();
-				// var i: number;
-				// for (i = 0; i<allblocks.length; i++) {
-				// 	console.log("File: " + allblocks[i].file.path + ", Start: " + allblocks[i].startPos + ", Projekt: " + allblocks[i].tracker.project);
-				// }
-			}
-		});
+		if (this.settings.debugMode) {
+			this.addCommand({
+				id: `debug`,
+				name: `Debug files`,
+				callback: async () => {
+					new ReportModal(this.app, this.settings, text => console.log(text)).open();
+				}
+			});
+		}
 	}
 
 	async loadSettings() {

@@ -1,5 +1,5 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
-import SimpleTimeTrackerPlugin from "./main";
+import TimeTrackerPlugin from "./main";
 import { defaultSettings } from "./settings";
 
 export class TimeTrackerSettingsTab extends PluginSettingTab {
@@ -37,6 +37,17 @@ export class TimeTrackerSettingsTab extends PluginSettingTab {
                 t.setValue(String(this.plugin.settings.csvDelimiter));
                 t.onChange(async v => {
                     this.plugin.settings.csvDelimiter = v.length ? v : defaultSettings.csvDelimiter;
+                    await this.plugin.saveSettings();
+                });
+            });
+
+        new Setting(this.containerEl)
+            .setName("Enable debug command")
+            .setDesc("Adds a \"Debug files\" command to the command palette, for development use. Requires reloading the plugin to take effect.")
+            .addToggle(t => {
+                t.setValue(this.plugin.settings.debugMode);
+                t.onChange(async v => {
+                    this.plugin.settings.debugMode = v;
                     await this.plugin.saveSettings();
                 });
             });
