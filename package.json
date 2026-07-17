@@ -6,11 +6,11 @@
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-		"test": "node --import tsx --test tests/model.test.ts tests/report-logic.test.ts",
+		"test": "node --import tsx --test tests/model.test.ts tests/report-logic.test.ts tests/text-escape.test.ts",
 		"version": "node version-bump.mjs && git add manifest.json versions.json"
 	},
 	"keywords": [],
-	"author": "mwe",
+	"author": "mwe <mwe@wewid.se>",
 	"license": "MIT",
 	"devDependencies": {
 		"@types/node": "^16.11.6",

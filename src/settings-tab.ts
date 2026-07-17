@@ -13,7 +13,7 @@ export class TimeTrackerSettingsTab extends PluginSettingTab {
 
     display(): void {
         this.containerEl.empty();
-        this.containerEl.createEl("h2", { text: "Super Simple Time Tracker Settings" });
+        this.containerEl.createEl("h2", { text: "Time Tracker Settings" });
 
         new Setting(this.containerEl)
             .setName("Timestamp Display Format")
@@ -53,8 +53,7 @@ export class TimeTrackerSettingsTab extends PluginSettingTab {
             });
 
         this.containerEl.createEl("hr");
-        this.containerEl.createEl("p", { text: "If you like this plugin and want to support its development, you can do so through my website by clicking this fancy image!" });
-        this.containerEl.createEl("a", { href: "https://ellpeck.de/support" })
-            .createEl("img", { attr: { src: "https://ellpeck.de/res/generalsupport.png" }, cls: "time-tracker-support" });
+        this.containerEl.createEl("p", { text: "Questions or feedback? Get in touch: " })
+            .createEl("a", { text: "mwe@wewid.se", href: "mailto:mwe@wewid.se" });
     }
 }

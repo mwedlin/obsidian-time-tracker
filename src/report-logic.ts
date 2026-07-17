@@ -7,6 +7,7 @@
 import moment from "moment";
 import { Moment } from "moment";
 import { Entry } from "./types";
+import { escapeMarkdownCell } from "./text-escape";
 
 // Construct a display name from project and client.
 export function toName(project: string, client: string): string {
@@ -100,7 +101,10 @@ export function createMarkdownTable(start: number, end: number, entries: Entry[]
     }
     ret += "---\n";
     for (let i = 0; i < projects.length; i++) { // Project sums
-        ret += projects[i] + " |";
+        // projects[i] itself must stay unescaped below (daySum matches it
+        // verbatim against entry names); only escape it where it's written
+        // into the generated table.
+        ret += escapeMarkdownCell(projects[i]) + " |";
         for (let j = 0; j < days.length; j++) {
             ret += daySum(projects[i], days[j], entries) + " |";
         }

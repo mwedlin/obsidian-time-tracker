@@ -4,6 +4,7 @@
 import moment from "moment";
 import { Entry, Tracker } from "./types";
 import { TimeTrackerSettings } from "./settings";
+import { escapeCsvField, escapeMarkdownCell } from "./text-escape";
 
 export function loadTracker(json: string): Tracker {
     if (json) {
@@ -149,7 +150,7 @@ export function createCsv(tracker: Tracker, settings: TimeTrackerSettings): stri
     let ret = "";
     for (let entry of tracker.entries) {
         for (let row of createTableSection(entry, settings))
-            ret += row.join(settings.csvDelimiter) + "\n";
+            ret += row.map(field => escapeCsvField(field, settings.csvDelimiter)).join(settings.csvDelimiter) + "\n";
     }
     return ret;
 }
@@ -161,7 +162,7 @@ export function createTrackerTable(tracker: Tracker, settings: TimeTrackerSettin
     let ret = "Task | Start time | End time | Duration\n---|---|---|---\n";
     for (let entry of tracker.entries) {
         for (let row of createTableSection(entry, settings))
-            ret += row.join(" | ") + "\n";
+            ret += row.map(escapeMarkdownCell).join(" | ") + "\n";
     }
     return ret;
 }
