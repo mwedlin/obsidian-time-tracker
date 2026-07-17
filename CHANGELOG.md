@@ -4,6 +4,46 @@ All notable changes to the Time Tracker plugin, starting from `1.0.0` (the first
 public use). Versions follow [semantic versioning](https://semver.org/) — see `design.md`'s "Versioning"
 section for how patch/minor/major are chosen in this project.
 
+## [1.2.0] - 2026-07-17
+
+### Added
+- **Templater integration for custom output formats.** The `Report` command's table and a tracker's
+  `Copy as table`/`Copy as CSV` buttons can each be replaced with your own
+  [Templater](https://github.com/SilentVoid13/Templater) template instead of the built-in hardcoded
+  format, configured via three new settings (blank keeps the built-in format, the default). A new public
+  API (`app.plugins.plugins["time-tracker"].api`) hands a template the underlying data - raw seconds and
+  numbers, never pre-formatted - via a "stash and consume" pattern, plus formatting/escaping helpers.
+  Always falls back to the built-in format, with a `Notice`, on any failure (Templater not installed,
+  template missing, template throws) - a broken template never means nothing happens.
+- **A template setting can point at a folder instead of a single file.** You're prompted with a
+  searchable picker (recursing into subfolders) to choose which template to use each time, so several
+  variants - an invoice, a plain table, a summary - can live side by side.
+- **Five example templates** in `test-vault/templates/`: plain reproductions of the three built-in
+  formats, plus `invoice.md` and `invoice-html.md` - alternate Report table templates styled as a
+  single-client invoice. Both prompt for the client and an optional hourly rate via Templater's own
+  `tp.system.prompt`, billing one line per distinct task; `invoice-html.md` renders as a styled, theme-aware
+  HTML table instead of Markdown.
+- **`Time Tracker: Install template kit` command.** Installs a `.zip` of one or more Templater templates -
+  dragged in or picked via a file dialog, even from outside the vault - into a chosen vault folder,
+  preserving whatever structure the zip has. Every entry's path is validated against "zip slip" before
+  anything is written, and existing files are never silently overwritten.
+- A "Browse" button (a fuzzy file picker) next to each Templater path setting, so a path doesn't have to
+  be typed by hand.
+
+### Changed
+- The Report dialog's "a timer is currently running" warning now only appears once both dates are entered
+  *and* a running timer actually overlaps the chosen range - not for any running timer anywhere in the
+  vault, regardless of the reported period.
+- `npm run build` can now trigger Obsidian to reload itself afterward, via the Local REST API community
+  plugin if configured locally (see `CONTRIBUTING.md`) - a development convenience with no effect on the
+  shipped plugin.
+
+### Fixed
+- A race where a genuine file/folder selection in a picker could be misread as a cancel, depending on the
+  order Obsidian happened to fire its own selection/close callbacks in.
+- A confusing UX bug where cancelling or completing a folder-based template's file picker made the Report
+  dialog appear to "come back", since it hadn't actually been closed yet.
+
 ## [1.1.2] - 2026-07-17
 
 ### Added
