@@ -1,0 +1,7 @@
+
+# Auto-bump the patch version whenever a commit touches plugin source (src/).
+# Minor/major bumps stay manual (npm version minor|major).
+if git diff --cached --name-only | grep -q '^src/'; then
+    npm version patch --no-git-tag-version --silent
+    git add package.json package-lock.json manifest.json versions.json
+fi

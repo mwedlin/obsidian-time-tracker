@@ -173,6 +173,34 @@ after toggling, since commands are registered once at `onload`).
   shows the *user* embedding a `buttons`-plugin block that invokes this plugin's own "Stop all timers"
   command by name. It's a composition the vault author set up, not something `time-tracker` renders itself.
 
+## Versioning
+
+Standard semantic versioning (`MAJOR.MINOR.PATCH`), same as `npm version` and Obsidian's manifest expect:
+
+- **PATCH** (`1.1.0` → `1.1.1`) — bug fixes and internal changes with no visible change in behavior. E.g.
+  the CSV-escaping fix, the settings-tab title fix, or the `findDays` DST fix would each normally be a
+  patch on their own.
+- **MINOR** (`1.1.0` → `1.2.0`) — new, backward-compatible functionality: existing trackers/notes keep
+  working exactly as before, but something new is added. E.g. the status widget's live "Today" timer.
+- **MAJOR** (`1.x` → `2.0.0`) — breaking changes: something that could make existing data or setups stop
+  working as before. For this plugin that would mean changing the `Tracker`/`Entry` JSON shape so old
+  notes can't be read, removing a command, or changing a setting's meaning.
+
+Two Obsidian-specific wrinkles on top of plain semver, both handled by `version-bump.mjs` (run via
+`npm version <patch|minor|major|x.y.z>`):
+
+- `manifest.json`'s `minAppVersion` only goes up when the plugin starts relying on a newer Obsidian API —
+  it's independent of the plugin's own major/minor/patch number.
+- `versions.json` is an append-only map of *every* released plugin version → the `minAppVersion` it
+  needed at release time, so Obsidian can pick the right release for a user on an older Obsidian build.
+  That's why bumping adds a new entry rather than overwriting the old one.
+
+**Patch bumps are automatic.** A Husky `pre-commit` hook (`.husky/pre-commit`) runs on every commit: if
+the commit touches anything under `src/`, it runs `npm version patch --no-git-tag-version` and folds the
+resulting `package.json`/`package-lock.json`/`manifest.json`/`versions.json` changes into that same
+commit. Commits that don't touch `src/` (docs, `test-vault/`, config) are left alone — no patch churn for
+non-code changes. Minor and major bumps stay a deliberate, manual `npm version minor|major`.
+
 ## Confirmed with the author
 
 - The "one running entry per vault" invariant is deliberate: starting a timer anywhere is meant to stop
