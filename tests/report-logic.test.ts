@@ -5,7 +5,7 @@ process.env.TZ = "America/New_York";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import moment from "moment";
-import { toName, isWithin, findProjects, findDays, daySum } from "../src/report-logic";
+import { toName, isWithin, findProjects, findDays, daySum, daySumSeconds } from "../src/report-logic";
 import { Entry } from "../src/types";
 
 test("toName combines project and client, falling back sensibly", () => {
@@ -57,4 +57,16 @@ test("daySum sums only entries overlapping the given day, clipped to day boundar
     assert.equal(daySum("P", day, entries), "1.50");
     // undefined day -> sum across everything regardless of boundaries
     assert.equal(daySum("P", undefined, entries), (2 * 3600 / 3600).toFixed(2));
+});
+
+test("daySumSeconds returns the raw, unrounded seconds behind daySum's hours string", () => {
+    const day = moment("2024-06-15", "YYYY-MM-DD");
+    const dayStart = day.clone().startOf("day").unix();
+
+    const entries: Entry[] = [
+        { name: "P", startTime: dayStart, endTime: dayStart + 1800, subEntries: null }, // 30 min
+    ];
+
+    assert.equal(daySumSeconds("P", day, entries), 1800);
+    assert.equal(daySum("P", day, entries), (1800 / 3600).toFixed(2));
 });

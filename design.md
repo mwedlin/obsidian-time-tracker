@@ -17,7 +17,7 @@ unit-tested under plain Node (`tests/`, see improvement #4 below):
 |---|---|---|
 | `types.ts` | no | `Entry`/`Tracker` interfaces |
 | `model.ts` | no | tracker state machine (start/stop/split/remove), duration/timestamp formatting, CSV/table row building |
-| `report-logic.ts` | no | pure report math: `toName`, `isWithin`, `findProjects`, `findDays`, `daySum`, `createMarkdownTable` |
+| `report-logic.ts` | no | pure report math: `toName`, `isWithin`, `findProjects`, `findDays`, `daySumSeconds`/`daySum`, `createMarkdownTable` |
 | `dateutil.ts` | yes (`App` type only) | `parseDate` — strict format, falls back to the nldates-obsidian plugin |
 | `confirm-modal.ts` | yes | reusable "are you sure?" dialog |
 | `ticker.ts` | yes (DOM) | single shared 1s interval for all rendered trackers |
@@ -94,6 +94,16 @@ them at once:
   file/tracker is currently running (if any) and shows a single "stop all trackers" button, or a
   "nothing running" message. Meant to be dropped into a dashboard-style note (see
   `test-vault/Tidsredovisning.md`).
+  - Re-checks vault-wide state on every tick of the shared ticker (not just once at render), so
+    stopping/starting a timer elsewhere — another pane, or the "Stop all timers" command — is picked up
+    live instead of needing a note reload. The row is only rebuilt on an actual running/not-running (or
+    active-file) transition; otherwise only the live timer text is updated in place, to avoid rebuilding
+    the button every second.
+  - When something is running, it also shows a live "Today" timer: total vault-wide seconds already
+    logged today across **all** projects (via `allTracks`/`daySumSeconds(undefined, ...)`), computed once
+    per transition, plus the running entry's own elapsed time (clipped to today) added back in and ticked
+    live — the same "static total + live delta" pattern the default view uses for its own Current/Total
+    timers.
 - **today** (`displayToday`) — vault-wide summary table of hours-per-project for the current calendar
   day, built from `allTracks`/`findProjects`/`daySum` (see below), also meant for a dashboard note.
 
@@ -115,9 +125,10 @@ is pure and lives in `report-logic.ts`:
 3. `findDays(start, end)` — one moment per calendar day covering `[start, end]`, stepping with moment's
    DST-aware `.add(1, "day")` (see improvement #8 — the original fixed-24h-step version double-counted a
    day across a "fall back" transition).
-4. `daySum(project, day, entries)` — total hours (as a `"12.34"`-style string) matching a given
-   project (or all, if `undefined`) and a given day (or the whole range, if `undefined`); this one
-   function is reused for every cell, every per-project total, every per-day total, and the grand total.
+4. `daySumSeconds(project, day, entries)` — total seconds matching a given project (or all, if
+   `undefined`) and a given day (or the whole range, if `undefined`); `daySum` is a thin wrapper that
+   formats this as a `"12.34"`-style hours string. `daySumSeconds` is reused for every table cell, every
+   per-project total, every per-day total, the grand total, and the `status` widget's live "Today" timer.
 5. `createMarkdownTable(start, end, entries)` — assembles a Markdown table: rows = projects (from step
    2), columns = days (from step 3) + a **Total** column, cells = `daySum` per project/day.
 

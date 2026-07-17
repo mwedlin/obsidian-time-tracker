@@ -8,7 +8,7 @@ import {
 } from "./model";
 import { stopAll, readAll } from "./files";
 import { allTracks } from "./report";
-import { findProjects, daySum } from "./report-logic";
+import { findProjects, daySum, daySumSeconds } from "./report-logic";
 import { parseDate } from "./dateutil";
 import { ConfirmModal } from "./confirm-modal";
 import { onTick } from "./ticker";
@@ -151,28 +151,78 @@ export function displayTrackerDefault(tracker: Tracker, element: HTMLElement, ge
 
 // View a short status of the time tracking system.
 export async function displayStatus(tracker: Tracker, element: HTMLElement, getSectionInfo: () => MarkdownSectionInformation, settings: TimeTrackerSettings, app: App): Promise<void> {
-    // Find first running entry.
-    const sections = await readAll(app);
-    const activeSection = sections.find(s => isRunning(s.tracker));
-
     let tbl = element.createEl("table", { cls: "time-tracker-table" });
     let row1 = tbl.createEl("tr");
-    if (activeSection) { // Found an active section.
+
+    // Re-checked on every tick (not just re-rendered once at load) so that
+    // stopping/starting a timer elsewhere - another pane, or the "Stop all
+    // timers" command - is picked up without having to reload the note. The
+    // row is only rebuilt on an actual running/not-running (or active-file)
+    // transition; otherwise just the live timer text is updated in place.
+    let hasRendered = false;
+    let renderedFilePath: string = undefined;
+    let updateToday: (() => void) | null = null;
+
+    async function refresh(): Promise<void> {
+        const sections = await readAll(app);
+        const activeSection = sections.find(s => isRunning(s.tracker));
+        const activeFilePath = activeSection ? activeSection.file.path : undefined;
+
+        if (hasRendered && activeFilePath === renderedFilePath) {
+            updateToday?.();
+            return;
+        }
+        hasRendered = true;
+        renderedFilePath = activeFilePath;
+        updateToday = null;
+        row1.empty();
+
+        if (!activeSection) {
+            row1.createEl("td").createEl("span", { text: "No active trackers running." });
+            return;
+        }
+
+        const runningEntry = getRunningEntry(activeSection.tracker.entries);
+
+        // Seconds already logged today across ALL projects, excluding the
+        // still-running entry (which has no endTime yet); its own elapsed
+        // time is added live below, the same way the default view's timers work.
+        const todayStart = moment().startOf("day").unix();
+        const todayEnd = moment().endOf("day").unix();
+        const allToday = await allTracks(app, todayStart, todayEnd);
+        const loggedSecondsToday = daySumSeconds(undefined, moment(), allToday);
+
         let td1 = row1.createEl("td");
-        let msg = row1.createEl("td").createEl("span", { text: "Active timer in note " + activeSection.file.path });
-        let btn = new ButtonComponent(td1)
+        row1.createEl("td").createEl("span", { text: "Active timer in note " + activeSection.file.path });
+
+        let td2 = row1.createEl("td");
+        let timer = td2.createDiv({ cls: "time-tracker-timers" });
+        let todayDiv = timer.createEl("div", { cls: "time-tracker-timer" });
+        let todayTime = todayDiv.createEl("span", { cls: "time-tracker-timer-time" });
+        todayDiv.createEl("span", { text: "Today" });
+
+        updateToday = () => {
+            const runningStart = Math.max(runningEntry.startTime, todayStart);
+            const now = Math.min(moment().unix(), todayEnd);
+            const liveSeconds = Math.max(0, now - runningStart);
+            todayTime.setText(formatDuration((loggedSecondsToday + liveSeconds) * 1000));
+        };
+
+        new ButtonComponent(td1)
             .setClass("clickable-icon")
             .setIcon(`lucide-stop-circle`)
             .setTooltip("Stop all trackers")
             .onClick(async () => {
                 await stopAll(app);
-                btn.buttonEl.hide();
-                msg.setText("No active trackers running.");
-            });
-        btn.buttonEl.addClass("time-tracker-btn");
-    } else {
-        row1.createEl("td").createEl("span", { text: "No active trackers running." });
+                await refresh();
+            })
+            .buttonEl.addClass("time-tracker-btn");
+
+        updateToday();
     }
+
+    await refresh();
+    onTick(element, refresh);
 }
 
 export async function displayToday(tracker: Tracker, element: HTMLElement, getSectionInfo: () => MarkdownSectionInformation, settings: TimeTrackerSettings, app: App): Promise<void> {

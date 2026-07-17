@@ -53,11 +53,11 @@ export function findDays(start: number, end: number): Moment[] {
     return r;
 }
 
-// Return the number of hours (as a "12.34"-style string) worked on a project on a specific day.
+// Return the number of seconds worked on a project on a specific day.
 // If project is undefined, report a total sum of all projects this day.
 // If day is undefined, report time of all days for the project.
-export function daySum(project: string, day: Moment, entries: Entry[]): string {
-    let sum = 0; // Seconds
+export function daySumSeconds(project: string, day: Moment, entries: Entry[]): number {
+    let sum = 0;
     let doAll: boolean;
     let dayStart: number;
     let dayEnd: number;
@@ -83,7 +83,12 @@ export function daySum(project: string, day: Moment, entries: Entry[]): string {
             }
         }
     }
-    return (sum / 3600).toFixed(2);
+    return sum;
+}
+
+// Same as daySumSeconds, formatted as a "12.34"-style string of hours.
+export function daySum(project: string, day: Moment, entries: Entry[]): string {
+    return (daySumSeconds(project, day, entries) / 3600).toFixed(2);
 }
 
 // Build a markdown table: rows = projects, columns = days + a Total column.
