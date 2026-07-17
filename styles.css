@@ -58,3 +58,22 @@
 .time-tracker-table .clickable-icon {
 	display: inline;
 }
+
+.time-tracker-running-warning {
+	color: var(--text-warning);
+}
+
+.time-tracker-parse-error {
+	background-color: var(--background-modifier-error);
+	/* --text-error is meant as an accent on a normal background, not paired
+	   with an already-red fill - stacking the two gave near-invisible text. */
+	color: var(--text-normal);
+	padding: 10px;
+	border-radius: var(--radius-s);
+}
+
+.time-tracker-active-marker {
+	margin-left: 0.5em;
+	color: var(--text-success);
+	font-weight: bold;
+}

@@ -1,18 +1,18 @@
-import { App, Modal, ButtonComponent, TextComponent } from "obsidian";
+import { App, Modal, ButtonComponent, TextComponent, TFile } from "obsidian";
 import { TimeTrackerSettings } from "./settings";
 import { Entry } from "./types";
-import { readAll } from "./files";
+import { readAll, FileSection } from "./files";
+import { isRunning, latestEntryTime } from "./model";
 import { isWithin, toName, createMarkdownTable } from "./report-logic";
 import { parseDate } from "./dateutil";
 
 export { findProjects, findDays, daySum, createMarkdownTable } from "./report-logic";
 
-// Make a flat list of all time entries in the vault overlapping [start, end],
-// clipped to that range, and labeled with their project/client name.
-export async function allTracks(app: App, start: number, end: number): Promise<Entry[]> {
+// Make a flat list of all time entries in sections overlapping [start, end],
+// clipped to that range, and labeled with their project/client name. Doesn't
+// scan the vault itself - see allTracks/allTracksFromSections below.
+function flattenTracks(sections: FileSection[], start: number, end: number): Entry[] {
     let ret: Entry[] = [];
-    const sections = await readAll(app);
-
     for (const section of sections) {
         if (!section.tracker.entries)
             continue;
@@ -31,6 +31,48 @@ export async function allTracks(app: App, start: number, end: number): Promise<E
     return ret;
 }
 
+// Make a flat list of all time entries in the vault overlapping [start, end],
+// clipped to that range, and labeled with their project/client name.
+export async function allTracks(app: App, start: number, end: number): Promise<Entry[]> {
+    return flattenTracks(await readAll(app), start, end);
+}
+
+// Same as allTracks, but for a section list the caller already has in hand
+// (e.g. from its own readAll(app) call), to avoid a second, redundant vault
+// scan on top - see displayStatus/displayToday in tracker.ts.
+export function allTracksFromSections(sections: FileSection[], start: number, end: number): Entry[] {
+    return flattenTracks(sections, start, end);
+}
+
+// For each project/client name present in sections, pick the single note
+// that best represents it: the one with a currently running timer, if any,
+// otherwise whichever has the most recent (already-stopped) entry. Takes an
+// already-fetched section list rather than scanning the vault itself, since
+// callers (displayStatus/displayToday) already have one from their own
+// readAll(app) call and re-scanning again on top would be wasteful - they
+// already tick every second.
+export function pickProjectFiles(sections: FileSection[]): Map<string, TFile> {
+    const best = new Map<string, { file: TFile; running: boolean; latest: number }>();
+
+    for (const section of sections) {
+        const name = toName(section.tracker.project, section.tracker.client);
+        const running = isRunning(section.tracker);
+        const latest = latestEntryTime(section.tracker.entries ?? []);
+        const current = best.get(name);
+
+        if (!current
+            || (running && !current.running)
+            || (running === current.running && latest > current.latest)) {
+            best.set(name, { file: section.file, running, latest });
+        }
+    }
+
+    const result = new Map<string, TFile>();
+    for (const [name, entry] of best)
+        result.set(name, entry.file);
+    return result;
+}
+
 // Report modal: lets the user pick a date range and appends a markdown table
 // of hours-per-project-per-day at the cursor.
 export class ReportModal extends Modal {
@@ -44,7 +86,7 @@ export class ReportModal extends Modal {
         this.onSubmit = onSubmit;
     }
 
-    onOpen(): void {
+    async onOpen(): Promise<void> {
         const { contentEl } = this;
         contentEl.createEl("h2", { text: "Report as table" });
         let tbl = contentEl.createEl("table", { cls: "time-tracker-table" });
@@ -98,6 +140,18 @@ export class ReportModal extends Modal {
                     this.onSubmit(text);
                 }
             });
+
+        // Non-blocking heads-up rather than forcing a stop-or-continue choice:
+        // generating a report and stopping your current timer are different
+        // actions, and a running entry's elapsed time is invisible to the
+        // report until it's actually stopped (see allTracks/isWithin).
+        const sections = await readAll(this.app);
+        if (sections.some(s => isRunning(s.tracker))) {
+            contentEl.createEl("p", {
+                text: "⚠ A timer is currently running and won't be included in the report until it's stopped.",
+                cls: "time-tracker-running-warning",
+            });
+        }
     }
 
     onClose(): void {

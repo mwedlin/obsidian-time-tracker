@@ -1,7 +1,7 @@
 import { Editor, MarkdownView, Plugin } from "obsidian";
 import { defaultSettings, TimeTrackerSettings } from "./settings";
 import { TimeTrackerSettingsTab } from "./settings-tab";
-import { displayTracker, loadTracker } from "./tracker";
+import { displayTracker, displayParseError, loadTracker } from "./tracker";
 import { stopAll } from "./files";
 import { ReportModal } from "./report";
 
@@ -15,8 +15,12 @@ export default class TimeTrackerPlugin extends Plugin {
 		this.addSettingTab(new TimeTrackerSettingsTab(this.app, this));
 
 		this.registerMarkdownCodeBlockProcessor("time-tracker", (s, e, i) => {
-			let tracker = loadTracker(s);
 			e.empty();
+			let tracker = loadTracker(s);
+			if (!tracker) {
+				displayParseError(e);
+				return;
+			}
 			displayTracker(tracker, e, () => i.getSectionInfo(e), this.settings, this.app);
 		});
 

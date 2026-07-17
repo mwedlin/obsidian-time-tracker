@@ -66,6 +66,41 @@ different projects in one file).
   splice in a new `JSON.stringify(tracker)`, and writes the file back. There's no separate database —
   the note *is* the database, and the block position is only valid until the next edit.
 
+## Robustness against hand-edited/malformed JSON
+
+Since a tracker's data is just JSON sitting in a note, nothing stops a user from editing it directly and
+introducing a mistake - a syntax error, or a field like `entries` set to the wrong type. `loadTracker`
+(`model.ts`) is the single gatekeeper for this, and returns `Tracker | null`:
+
+- An **empty block** (nothing typed yet - the normal state right after inserting one) returns a blank
+  `Tracker`. Not an error.
+- A **missing or `null` "entries"** field is healed to `[]` rather than treated as an error: there's
+  nothing recoverable being lost (if it was absent, there was nothing there to preserve), and this keeps
+  older/hand-written trackers that never had `entries` from getting flagged unnecessarily.
+- **Anything else that doesn't parse into a plausible shape** — broken JSON syntax, the parsed value not
+  being an object, or `entries` being present but not an array (a string, a number, an object) — returns
+  `null`. This was found to matter in practice: several places downstream assume `entries` is a real array
+  and throw otherwise (verified: `displayTrackerDefault`'s `tracker.entries.length` throws
+  `Cannot read properties of undefined (reading 'length')` if `entries` is missing; a string value gets
+  iterated character-by-character by `for...of`, each character treated as a fake "entry" with no
+  `endTime`, which `isRunning` would then report as a running task).
+
+The reason this returns `null` instead of silently substituting a fresh blank tracker (which is what the
+code used to do, and is a real difference from before): rendering an *interactive* UI over a guessed-at
+fallback means one stray button click (Start, Edit, Remove — anything that calls `saveTracker`) writes
+that fresh/guessed tracker straight back over the file, discarding whatever the user's original text
+actually was, with no undo. Returning `null` lets the caller render a **read-only** error instead
+(`displayParseError` in `tracker.ts` — a plain message with a `background-color: var(--background-modifier-error)`
+box, wired up in `main.ts`'s code-block processor), so no save can happen and the original text stays
+untouched in the file until the user fixes it by hand. `files.ts`'s `readAll` skips a block entirely when
+`loadTracker` returns `null` for it, for the same reason: an unparseable block shouldn't be silently
+included in — or written to — vault-wide operations like `stopAll` or the reporting/status widgets.
+
+Deliberately out of scope: validating individual entries' fields (a bad `startTime`, say). Those don't
+crash — `moment.unix()` on a bad value produces an "Invalid Date", and `formatDuration` renders it as a
+visible `"NaNs"` rather than a plausible-looking wrong number — so it degrades cosmetically rather than
+destructively, and wasn't worth the added complexity of deep recursive validation.
+
 ## Cross-file scanning (`src/files.ts`)
 
 Because trackers are scattered across arbitrarily many notes, several features need to look at *all* of
@@ -85,27 +120,157 @@ them at once:
 ## Display modes (`Tracker.dispType`, handled in `displayTracker`)
 
 - **default / compact** (`displayTrackerDefault`) — the per-note tracker UI: Start/End button, a live
-  "current" + "total" countdown (now driven by the shared ticker, see improvement #5), Task/Project/Client
-  input boxes, and (default only) a table of entries with inline edit/continue/remove per row, plus
-  "Copy as table" / "Copy as CSV" buttons. Removing an entry now asks for confirmation first (improvement
-  #7). Starting a new entry here calls `stopAll()` first (vault-wide invariant above), then starts the
-  new one locally.
+  "current" + "total" countdown (driven by the shared ticker at `settings.timerUpdateSeconds` — see
+  "Ticker" below), Task/Project/Client input boxes, and (default only) a table of entries with inline
+  edit/continue/remove per row, plus "Copy as table" / "Copy as CSV" buttons. Removing an entry now asks
+  for confirmation first (improvement #7). Starting a new entry here calls `stopAll()` first (vault-wide
+  invariant above), then starts the new one locally.
+  - A chevron button next to Start/End toggles `tracker.dispType` between `"default"` and `"compact"`
+    (just flips the field and calls `saveTracker`, same as any other button here — no special-cased
+    re-render, Obsidian reprocesses the block once the note's content changes) — always present regardless
+    of the current mode, unlike "Copy as table/CSV" which only exist in `"default"`. Previously the only
+    way to switch a block's display mode was hand-editing `"dispType"` in the JSON directly.
 - **status** (`displayStatus`) — a vault-wide widget: scans with `readAll(app)` for whichever
   file/tracker is currently running (if any) and shows a single "stop all trackers" button, or a
   "nothing running" message. Meant to be dropped into a dashboard-style note (see
   `test-vault/Tidsredovisning.md`).
-  - Re-checks vault-wide state on every tick of the shared ticker (not just once at render), so
+  - Re-checked on every vault change (event-driven — see "Ticker" below — not on a fixed poll), so
     stopping/starting a timer elsewhere — another pane, or the "Stop all timers" command — is picked up
-    live instead of needing a note reload. The row is only rebuilt on an actual running/not-running (or
-    active-file) transition; otherwise only the live timer text is updated in place, to avoid rebuilding
-    the button every second.
-  - When something is running, it also shows a live "Today" timer: total vault-wide seconds already
-    logged today across **all** projects (via `allTracks`/`daySumSeconds(undefined, ...)`), computed once
-    per transition, plus the running entry's own elapsed time (clipped to today) added back in and ticked
-    live — the same "static total + live delta" pattern the default view uses for its own Current/Total
+    as soon as it happens, without needing a note reload. The row is only rebuilt on an actual
+    running/not-running (or active-file) transition; otherwise nothing needs to happen on that check at
+    all, since the live number is ticked separately and doesn't need a rebuild.
+  - When something is running, it also shows a live "Today" timer, ticking every 1s: total vault-wide
+    seconds already logged today across **all** projects (via `allTracks`/`daySumSeconds(undefined, ...)`),
+    computed once per transition, plus the running entry's own elapsed time (clipped to today) added back
+    in — the same "static total + live delta" pattern the default view uses for its own Current/Total
     timers.
+  - The note name in "Active timer in note ..." is a real clickable link to that note (via
+    `createNoteLink`, see below) — unambiguous here since there's only ever one active file at a time.
 - **today** (`displayToday`) — vault-wide summary table of hours-per-project for the current calendar
-  day, built from `allTracks`/`findProjects`/`daySum` (see below), also meant for a dashboard note.
+  day, built from `allTracks`/`findProjects`/`daySumSeconds` (see below), also meant for a dashboard note.
+  Uses the same event-driven-refresh/rebuild-only-on-transition pattern as `status`, but ticks its live
+  numbers every 30s rather than every 1s — precision matters less here. If something is running, its
+  project's row (added even if it has no completed entries logged yet today) and the Total row tick with
+  its elapsed-today time added on top of the completed-entries total, the same "static total + live
+  delta" split used everywhere else. The active project's row also gets a green "active" marker after its
+  duration value (`.time-tracker-active-marker`, `--text-success`, spaced with `margin-left` rather than a
+  literal space character) — rendered as a separate sibling `<span>` next to the value's own span,
+  specifically so the periodic `setText()` update to the value doesn't wipe the marker out along with it.
+  - Each project name is a link to the note that best represents it (see below), since a project isn't
+    necessarily confined to one note.
+
+**Ticker** (`src/ticker.ts`): one shared loop, driven by `requestAnimationFrame` rather than
+`setTimeout`/`setInterval`, fanning out to per-listener callbacks. rAF is scheduled by the renderer's own
+paint cycle (~60/sec) instead of the generic timer queue — both more frequent (so a listener gating on
+"has 1000ms passed" gets checked far more often than a 1-per-second timer would, making a single delayed
+check very unlikely to cost a whole missed interval) and smoother for anything meant to update
+continuously, which is what it's for. It also does nothing while the window isn't visible (nothing to
+redraw), and self-corrects immediately once it resumes, since callbacks recompute from the real current
+time rather than counting elapsed ticks.
+
+Each `onTick(element, callback, { intervalMs, onDisconnect })` call can ask for a slower effective cadence
+than the frame rate — a listener asking for `30_000` just skips frames until 30s of wall-clock time has
+passed since its own last run, so there's still only one `requestAnimationFrame` loop regardless of how
+many different cadences are in use. `onDisconnect`, if given, fires once, the moment `element.isConnected`
+is first found false — used by `displayStatus`/`displayToday` to unsubscribe their vault event listener
+(see below) at the same point they'd otherwise have been pruned from the tick loop.
+
+**Chasing down "status's live timer occasionally skips/jitters a second" took six rounds** before landing
+on rAF. Reported symptom: roughly 1 in 3 seconds visibly skipped, never more than one at a time — regular
+enough that it clearly wasn't just occasional main-thread jank. What actually fixed it, and what didn't,
+all on a `setTimeout`-based ticker before the eventual switch to rAF:
+
+1. *Drift correction* (a self-rescheduling `setTimeout` chain, recomputing its next delay off `Date.now()`
+   each cycle instead of a flat "+1000ms from now") and *debouncing the vault-scan-collision* (below) were
+   both real, legitimate improvements, but retesting after each showed no change in the reported symptom —
+   so neither was the (main) cause.
+2. *A listener leak*: all three `onTick` call sites originally passed the `element` parameter Obsidian
+   hands the code-block processor, not an element scoped to that specific render. Since Obsidian can reuse
+   that outer container across repeated re-invocations of the same code-block processor (e.g. during
+   live-preview view updates), `element.isConnected` could stay `true` even after `main.ts`'s `e.empty()`
+   had wiped out everything a previous render put inside it — so a stale render's ticker (and, for
+   `status`/`today`, its `vault.on("modify")` subscription) never got cleaned up, leaking one more of each
+   alongside the current render on every re-invocation. Fixed by passing `tbl` (a `<table>` created fresh
+   at the top of each render function, only ever connected for that specific render's lifetime) instead.
+   Real bug, worth fixing regardless — but retesting still showed no change, so this wasn't the (main)
+   cause either.
+3. *Oversampling*: tightened the `setTimeout` chain's base interval from 1000ms to 250ms so `status`'s live
+   update sampled 4x more often than the 1-second precision it actually needs, on the theory that
+   `setTimeout`'s "no earlier than the requested delay, never exactly on time" imprecision occasionally
+   fires late enough to land in the next whole second, and oversampling would usually still catch it inside
+   the same intended second. This did eliminate the skips, confirming the diagnosis — but retesting showed
+   a new symptom in its place: noticeably uneven pacing between visible updates.
+4. Root cause of *that* new symptom: the displayed value was still computed via `moment().unix()`
+   (`Math.floor(ms / 1000)`), so whether a given ~250ms sample's floor differed from the previous one
+   depended on exactly where the true 1-second boundary happened to fall within that sample's 250ms window.
+   Tried switching to `Date.now()`-based rounding to the nearest second (`Math.round`) instead of floored
+   *and reverting the base interval back to 1000ms* (removing the oversampling), reasoning that rounding's
+   full second-wide tolerance (N-0.5s to N+0.5s all display as N) no longer needed the oversampling's
+   redundancy to compensate for a razor-thin floor boundary. This fixed the uneven pacing — but retesting
+   showed the original skipping symptom was back: rounding alone doesn't help if an *individual*
+   `setTimeout` cycle is delayed enough (main-thread contention, timer coalescing, ...) to be the *only*
+   sample near a given transition and it lands more than 0.5s off; oversampling's redundancy (several
+   nearby chances to catch each transition) and rounding's wide tolerance (each of those chances is very
+   likely to land in the right window once it does get sampled) were solving two different halves of the
+   same problem, not substitutes for each other.
+5. *Both together* (250ms base interval **and** `Math.round`-based elapsed time) fixed the skipping, but
+   the reported jitter in update pacing persisted at a level found "annoying." A follow-up attempt to
+   compute the millisecond diff before dividing (`(Date.now() - runningStart*1000) / 1000`, rather than
+   `Date.now()/1000 - runningStart`) changed nothing, as expected going in — the two are algebraically
+   identical, and floating-point error between them is many orders of magnitude below anything that could
+   flip which second `Math.round` lands on. That confirmed the remaining jitter wasn't an arithmetic
+   artifact at all, but the practical precision floor of scheduling against the generic `setTimeout` queue.
+6. *What actually resolved it*: switched the whole ticker from `setTimeout` to `requestAnimationFrame` (the
+   mechanism described above). Distinct from oversampling a `setTimeout` chain — rAF is tied to the
+   renderer's actual paint cadence rather than the generic timer queue, which is the more fundamental fix
+   for a display that's meant to visually update smoothly. The explicit 250ms base interval from point 3 is
+   gone (moot once checks happen on every paint frame instead — `status`'s tick call now just states its
+   real target, `intervalMs: 1000`), but the `Math.round`-based elapsed time from point 4 stayed: it's
+   still the more correct way to turn a millisecond timestamp into "the nearest second," independent of
+   whatever's driving how often that computation runs.
+
+Per-widget cadence, chosen per how much a stale number actually matters for that widget: `status` ticks
+every 1s (its own live "Today" number, cheap local math), `today` every 30s (same idea, but precision
+matters less for a summary table), and the default view's own Current/Total every 5s (also cheap local
+math against the in-memory tracker — Start/Stop/Edit/Remove already trigger a fresh re-render as soon as
+the note's content changes, so the slower cadence only affects how smoothly the number ticks up between
+clicks, not how quickly an action itself is reflected).
+
+**Why `status`/`today` moved from polling to event-driven refresh:** both used to re-run their entire
+`readAll(app)` vault scan on every tick — 1s and (before this change) also 1s respectively — regardless of
+whether anything had actually changed. They now instead call `app.vault.on("modify", () => refresh())`
+once, when first rendered, and only pay for a `readAll()` scan when a note is actually modified anywhere
+in the vault — which is exactly when the running/not-running state could have changed. This is a net win
+on both axes: faster reaction (near-instant on the actual change, rather than up to a full tick interval
+of staleness) and less wasted work (no scanning at all while nothing is happening, e.g. a status widget
+left open on a note the user is just reading). The tradeoff accepted knowingly: this relies on `vault.modify`
+firing for every write that matters, which holds for this plugin's own writes (`saveTracker`/`stopAll` both
+go through `app.vault.modify(...)`), but there's no separate polling fallback anymore if some future write
+path bypassed that event for any reason.
+
+**Avoiding a redundant second vault scan per refresh.** Both `refresh()` functions call `readAll(app)`
+directly (to find the active section), and both also needed the flattened, date-ranged entry list
+`allTracks` produces (for `daySumSeconds`) — but `allTracks(app, start, end)` originally did its *own*
+internal `readAll(app)` call, so every transition-triggered refresh scanned the whole vault twice. Split
+`allTracks`'s flattening logic out into `flattenTracks(sections, start, end)`, with `allTracks(app, ...)`
+as a thin wrapper around it and a new `allTracksFromSections(sections, ...)` for callers that already have
+a section list in hand. `displayStatus`/`displayToday` now pass their own already-fetched `sections`
+through to that instead of calling `allTracks(app, ...)` again — halving the scan work on exactly the path
+that matters most: starting a new timer (which stops the old one first, then writes the new one — two
+separate `vault.modify` writes, two debounced-together `refresh()` triggers, each of which used to scan
+twice).
+
+**Linking a project name to a note** (`pickProjectFiles` in `report.ts`, `createNoteLink` in `tracker.ts`):
+a project/client pair can have tracker blocks in several different notes, so `pickProjectFiles` picks one
+per project name, from an already-fetched `FileSection[]` (no extra vault scan — `displayStatus`/
+`displayToday` already have one from their own `readAll(app)` call, and both re-scan every tick, so
+avoiding a second scan on top matters here more than it would for a one-off call): whichever section has
+a currently running timer wins outright; otherwise, whichever has the most recent already-stopped entry
+(`latestEntryTime` in `model.ts`, the max `endTime` across an entry list's leaves/subEntries, ignoring
+still-running ones) wins. `createNoteLink` renders an `<a class="internal-link" href="...">` — that class
+is also what makes Obsidian's own Page Preview hover-popup work on it — and opens the actual `TFile`
+directly via `app.workspace.getLeaf(ctrlOrCmd).openFile(file)` on click, rather than resolving a link path,
+since the file is already in hand.
 
 `dispType: "legacy"` has been removed entirely (was a recognized but unimplemented no-op branch).
 
@@ -138,6 +303,41 @@ and "Append table at cursor" which runs the full pipeline above and hands the re
 back to the caller via an `onSubmit` callback (`main.ts` wires that callback to
 `editor.replaceSelection`).
 
+### Timezone
+
+Timestamps are stored as raw Unix seconds (timezone-agnostic), but every place that turns one into a
+date/time — `formatTimestamp`, `findDays`, `daySumSeconds`'s day boundaries — calls plain
+`moment(...)`/`moment.unix(...)` with no `.utc()`/`.tz(...)` anywhere in the codebase (no
+`moment-timezone` dependency either). Plain `moment()` resolves to whatever timezone the JS runtime
+reports as local, which comes from the OS (desktop) or the device (mobile) — there's no setting inside
+the plugin to configure or override this. Practical effect: "today" and day boundaries are always the
+*current device's* local midnight-to-midnight; logging time from two devices in different timezones can
+attribute the same instant to different calendar days depending on which device generated the report.
+
+### Known caveats around day boundaries
+
+- **A running (not-yet-stopped) entry is invisible to `allTracks`/`daySumSeconds` themselves**, not just
+  partially counted. `isWithin` compares against `entry.endTime`, and a `null` `endTime` coerces to `0` in
+  that numeric comparison, which is always "before" any real duration range — so `allTracks` silently
+  excludes it. Both the `status` and `today` widgets work around this deliberately (computing the running
+  entry's elapsed-today time separately, via `getRunningEntry`, and adding it back on top of the
+  `allTracks`-derived total — see the Display modes section above), so they do reflect a running timer's
+  time live. The `Report` command's table does **not** work around it — a running entry still contributes
+  nothing to a report until it's stopped — but `ReportModal` now shows a non-blocking warning
+  ("⚠ A timer is currently running and won't be included...") when it detects one running anywhere in the
+  vault at the time the modal opens, rather than silently producing an incomplete report. A blocking
+  "stop it first?" confirmation was considered and rejected: generating a report and stopping your current
+  timer are different actions, and forcing that choice risks an unwanted side effect (ending a work
+  session) just to preview numbers.
+- **A ~1-second-per-midnight-crossing rounding quirk**, found while verifying the above: an entry
+  spanning midnight gets clipped to each day's `[startOf("days"), endOf("days")]` window in
+  `daySumSeconds`. `endOf("days")` computes `23:59:59.999`, but `.unix()` truncates that to whole
+  seconds (`23:59:59`), so the day-before-midnight portion of a split entry is undercounted by up to 1
+  second (verified: a 3h entry from 23:00→02:00 comes out as 3599s + 7200s = 10799s, one second short of
+  the true 10800s). Invisible at the report's 2-decimal-hour display precision — accepted as-is, not
+  worth the complexity of switching to a half-open `[start, nextDayStart)` interval for a difference that
+  never surfaces in the UI.
+
 ## Date parsing (`parseDate` in `src/dateutil.ts`)
 
 Tries a strict `moment(dt, format, true)` parse first, using the user-configured timestamp format
@@ -161,10 +361,15 @@ than reading `this.app` from a non-method context (that was one of the bugs in `
 
 ## Settings (`src/settings.ts`, `src/settings-tab.ts`)
 
-Three values: `timestampFormat` (a moment.js format string, used for both display and strict parsing),
-`csvDelimiter` (default `,`, so it can be swapped to `;` for locales where `,` is a decimal separator),
-and `debugMode` (boolean, default off — gates the "Debug files" command; requires reloading the plugin
-after toggling, since commands are registered once at `onload`).
+- `timestampFormat` — a moment.js format string, used for both display and strict parsing.
+- `csvDelimiter` (default `,`) — so it can be swapped to `;` for locales where `,` is a decimal separator.
+- `debugMode` (boolean, default off) — gates the "Debug files" command; requires reloading the plugin
+  after toggling, since commands are registered once at `onload`.
+- `timerUpdateSeconds` / `statusUpdateSeconds` / `todayUpdateSeconds` (default `5` / `1` / `30`) — how
+  often, in seconds, the default view's Current/Total timer, the `status` widget's live "Today" timer, and
+  the `today` widget's live numbers each refresh (fed straight into their respective `onTick(...)` calls in
+  `tracker.ts` as `intervalMs`, ×1000). The settings tab validates each as a positive number, falling back
+  to its default on anything else (empty, non-numeric, zero or negative).
 
 ## External/optional integrations
 

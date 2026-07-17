@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
     loadTracker, isRunning, getRunningEntry, getDuration, getTotalDuration,
     startNewEntry, startSubEntry, endRunningEntry, removeEntry, formatDuration,
+    latestEntryTime,
 } from "../src/model";
 import { Entry, Tracker } from "../src/types";
 
@@ -12,9 +13,28 @@ test("loadTracker parses valid JSON", () => {
     assert.deepEqual(tracker.entries, []);
 });
 
-test("loadTracker falls back to an empty tracker on invalid/empty JSON", () => {
+test("loadTracker returns an empty tracker for an empty block (a freshly inserted one)", () => {
     assert.deepEqual(loadTracker("").entries, []);
-    assert.deepEqual(loadTracker("not json").entries, []);
+});
+
+test("loadTracker returns null (not a guessed-at fallback) for broken JSON", () => {
+    assert.equal(loadTracker("not json"), null);
+    assert.equal(loadTracker('{"entries": [}'), null); // truncated/invalid syntax
+});
+
+test("loadTracker returns null for valid JSON with a malformed \"entries\" field", () => {
+    assert.equal(loadTracker('{"entries": "oops"}'), null); // string, not an array
+    assert.equal(loadTracker('{"entries": 5}'), null); // number, not an array
+    assert.equal(loadTracker('{"entries": {}}'), null); // object, not an array
+    assert.equal(loadTracker("[]"), null); // valid JSON, but not an object at all
+});
+
+test("loadTracker normalizes a missing/null \"entries\" field to an empty array rather than erroring", () => {
+    // unlike a wrong-typed entries field, a missing one doesn't lose any
+    // recoverable data - there was nothing there to begin with - so it's
+    // healed instead of treated as an error.
+    assert.deepEqual(loadTracker('{"project":"P"}').entries, []);
+    assert.deepEqual(loadTracker('{"project":"P","entries":null}').entries, []);
 });
 
 test("isRunning is false with no entries, true with an open entry", () => {
@@ -85,8 +105,29 @@ test("removeEntry returns false for an entry that isn't present", () => {
     assert.equal(removeEntry(entries, notThere), false);
 });
 
-test("formatDuration renders hours/minutes/seconds", () => {
-    assert.equal(formatDuration(1000), "1s");
-    assert.equal(formatDuration(61_000), "1m 1s");
-    assert.equal(formatDuration(3_661_000), "1h 1m 1s");
+test("formatDuration renders hours/minutes/seconds, minutes and seconds zero-padded to 2 digits", () => {
+    assert.equal(formatDuration(1000), "01s");
+    assert.equal(formatDuration(61_000), "01m 01s");
+    assert.equal(formatDuration(3_661_000), "1h 01m 01s");
+    // double-digit minutes/seconds stay as-is, not further padded
+    assert.equal(formatDuration((15 * 60 + 45) * 1000), "15m 45s");
+});
+
+test("latestEntryTime finds the max endTime across leaves and subEntries, ignoring still-running ones", () => {
+    const entries: Entry[] = [
+        { name: "a", startTime: 0, endTime: 100, subEntries: null },
+        {
+            name: "b", startTime: null, endTime: null, subEntries: [
+                { name: "Part 1", startTime: 200, endTime: 300, subEntries: null },
+                { name: "Part 2", startTime: 400, endTime: null, subEntries: null }, // still running
+            ]
+        },
+    ];
+    assert.equal(latestEntryTime(entries), 300);
+});
+
+test("latestEntryTime returns 0 when nothing has finished yet", () => {
+    const entries: Entry[] = [{ name: "a", startTime: 0, endTime: null, subEntries: null }];
+    assert.equal(latestEntryTime(entries), 0);
+    assert.equal(latestEntryTime([]), 0);
 });

@@ -1,6 +1,8 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import TimeTrackerPlugin from "./main";
-import { defaultSettings } from "./settings";
+import { defaultSettings, TimeTrackerSettings } from "./settings";
+
+type UpdateIntervalKey = keyof Pick<TimeTrackerSettings, "timerUpdateSeconds" | "statusUpdateSeconds" | "todayUpdateSeconds">;
 
 export class TimeTrackerSettingsTab extends PluginSettingTab {
 
@@ -41,6 +43,19 @@ export class TimeTrackerSettingsTab extends PluginSettingTab {
                 });
             });
 
+        this.addUpdateIntervalSetting(
+            "Timer display update interval (seconds)",
+            "How often the per-note tracker's Current/Total timer refreshes.",
+            "timerUpdateSeconds");
+        this.addUpdateIntervalSetting(
+            "Status widget update interval (seconds)",
+            "How often the status widget's live \"Today\" timer refreshes.",
+            "statusUpdateSeconds");
+        this.addUpdateIntervalSetting(
+            "Today widget update interval (seconds)",
+            "How often the today widget's live numbers refresh.",
+            "todayUpdateSeconds");
+
         new Setting(this.containerEl)
             .setName("Enable debug command")
             .setDesc("Adds a \"Debug files\" command to the command palette, for development use. Requires reloading the plugin to take effect.")
@@ -55,5 +70,19 @@ export class TimeTrackerSettingsTab extends PluginSettingTab {
         this.containerEl.createEl("hr");
         this.containerEl.createEl("p", { text: "Questions or feedback? Get in touch: " })
             .createEl("a", { text: "mwe@wewid.se", href: "mailto:mwe@wewid.se" });
+    }
+
+    private addUpdateIntervalSetting(name: string, desc: string, key: UpdateIntervalKey): void {
+        new Setting(this.containerEl)
+            .setName(name)
+            .setDesc(desc)
+            .addText(t => {
+                t.setValue(String(this.plugin.settings[key]));
+                t.onChange(async v => {
+                    const n = parseFloat(v);
+                    this.plugin.settings[key] = (v.length && !isNaN(n) && n > 0) ? n : defaultSettings[key];
+                    await this.plugin.saveSettings();
+                });
+            });
     }
 }

@@ -34,12 +34,14 @@ export async function readAll(app: App): Promise<FileSection[]> {
                 continue;
 
             const json = lines.slice(lineStart + 1, lineEnd).join("\n");
-            result.push({
-                file,
-                lineStart,
-                lineEnd,
-                tracker: loadTracker(json),
-            });
+            const tracker = loadTracker(json);
+            // Unparseable blocks are skipped rather than guessed at: they're
+            // rendered as a read-only error in the note itself (see
+            // displayParseError in tracker.ts), and shouldn't be silently
+            // included - or worse, written to - by vault-wide operations like
+            // stopAll or the reporting/status widgets.
+            if (tracker)
+                result.push({ file, lineStart, lineEnd, tracker });
         }
     }
     return result;

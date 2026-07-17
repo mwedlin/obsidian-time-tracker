@@ -1,4 +1,4 @@
-import { moment, App, MarkdownSectionInformation, ButtonComponent, TextComponent } from "obsidian";
+import { moment, App, MarkdownSectionInformation, ButtonComponent, TextComponent, TFile } from "obsidian";
 import { TimeTrackerSettings } from "./settings";
 import { Tracker, Entry } from "./types";
 import {
@@ -7,8 +7,8 @@ import {
     formatTimestamp, formatDuration, createTrackerTable, createCsv,
 } from "./model";
 import { stopAll, readAll } from "./files";
-import { allTracks } from "./report";
-import { findProjects, daySum, daySumSeconds } from "./report-logic";
+import { allTracksFromSections, pickProjectFiles } from "./report";
+import { findProjects, daySumSeconds, toName } from "./report-logic";
 import { parseDate } from "./dateutil";
 import { ConfirmModal } from "./confirm-modal";
 import { onTick } from "./ticker";
@@ -29,6 +29,54 @@ export async function saveTracker(tracker: Tracker, app: App, section: MarkdownS
     content = `${prev}\n${JSON.stringify(tracker)}\n${next}`;
 
     await app.vault.modify(file, content);
+}
+
+// Wraps an async refresh function so rapid-fire calls (e.g. a burst of
+// vault "modify" events from someone editing an unrelated note) collapse
+// into a single run instead of each kicking off its own overlapping vault
+// scan: waits delayMs of quiet before running, and if triggered again while
+// still running, queues at most one more run rather than starting concurrently.
+function debounced(fn: () => Promise<void>, delayMs: number): () => void {
+    let timer: number = null;
+    let running = false;
+    let queued = false;
+
+    async function run(): Promise<void> {
+        if (running) {
+            queued = true;
+            return;
+        }
+        running = true;
+        try {
+            await fn();
+        } finally {
+            running = false;
+            if (queued) {
+                queued = false;
+                run();
+            }
+        }
+    }
+
+    return () => {
+        if (timer !== null)
+            window.clearTimeout(timer);
+        timer = window.setTimeout(() => {
+            timer = null;
+            run();
+        }, delayMs);
+    };
+}
+
+// Rendered instead of an interactive tracker when loadTracker couldn't make
+// sense of the block's JSON - read-only, on purpose: rendering the normal
+// interactive UI here would let a stray button click (Start, Edit, ...) save
+// straight over whatever the user's original (broken) text was.
+export function displayParseError(element: HTMLElement): void {
+    const box = element.createEl("div", { cls: "time-tracker-parse-error" });
+    box.createEl("p", {
+        text: "⚠ Couldn't read this time tracker: its data doesn't look valid (broken JSON, or a field like \"entries\" isn't the expected shape). Nothing has been changed - edit the block's raw text directly to fix it.",
+    });
 }
 
 export function displayTracker(tracker: Tracker, element: HTMLElement, getSectionInfo: () => MarkdownSectionInformation, settings: TimeTrackerSettings, app: App): void {
@@ -112,6 +160,20 @@ export function displayTrackerDefault(tracker: Tracker, element: HTMLElement, ge
         });
     btn.buttonEl.addClass("time-tracker-btn");
 
+    // Compact/full view toggle - always visible regardless of the current
+    // mode (unlike "Copy as table/CSV" below, which only exist in full view),
+    // so it lives here rather than down in the entries-table section.
+    let compact = tracker.dispType == "compact";
+    let compactBtn = new ButtonComponent(td1)
+        .setClass("clickable-icon")
+        .setIcon(compact ? "lucide-chevron-down" : "lucide-chevron-up")
+        .setTooltip(compact ? "Show entries table" : "Compact view")
+        .onClick(async () => {
+            tracker.dispType = compact ? "default" : "compact";
+            await saveTracker(tracker, app, getSectionInfo());
+        });
+    compactBtn.buttonEl.addClass("time-tracker-btn");
+
     // add timers
     let td2 = row1.createEl("td");
     let timer = td2.createDiv({ cls: "time-tracker-timers" });
@@ -146,7 +208,17 @@ export function displayTrackerDefault(tracker: Tracker, element: HTMLElement, ge
     }
 
     setCountdownValues(tracker, current, total, currentDiv);
-    onTick(element, () => setCountdownValues(tracker, current, total, currentDiv));
+    // Purely local math against the already-in-memory tracker - no vault
+    // scan involved - and Start/Stop/Edit/Remove already trigger a fresh
+    // re-render via the note's own content changing, so a slower cadence
+    // here only affects how smoothly the running duration ticks up between
+    // clicks, not how quickly actions are reflected.
+    // Check tbl (created fresh above, every render), not the outer element:
+    // Obsidian can reuse that outer container across repeated re-invocations
+    // of this code-block processor, so it never reports "disconnected" even
+    // after main.ts's e.empty() has wiped this exact render's content out -
+    // which would otherwise leak an ever-growing pile of stale tickers.
+    onTick(tbl, () => setCountdownValues(tracker, current, total, currentDiv), { intervalMs: settings.timerUpdateSeconds * 1000 });
 }
 
 // View a short status of the time tracking system.
@@ -154,11 +226,12 @@ export async function displayStatus(tracker: Tracker, element: HTMLElement, getS
     let tbl = element.createEl("table", { cls: "time-tracker-table" });
     let row1 = tbl.createEl("tr");
 
-    // Re-checked on every tick (not just re-rendered once at load) so that
-    // stopping/starting a timer elsewhere - another pane, or the "Stop all
-    // timers" command - is picked up without having to reload the note. The
-    // row is only rebuilt on an actual running/not-running (or active-file)
-    // transition; otherwise just the live timer text is updated in place.
+    // Re-checked on every vault change (not just re-rendered once at load) so
+    // that stopping/starting a timer elsewhere - another pane, or the "Stop
+    // all timers" command - is picked up without having to reload the note.
+    // The row is only rebuilt on an actual running/not-running (or
+    // active-file) transition; otherwise nothing needs to happen here at all,
+    // since the live "Today" number is ticked separately below without a scan.
     let hasRendered = false;
     let renderedFilePath: string = undefined;
     let updateToday: (() => void) | null = null;
@@ -168,10 +241,8 @@ export async function displayStatus(tracker: Tracker, element: HTMLElement, getS
         const activeSection = sections.find(s => isRunning(s.tracker));
         const activeFilePath = activeSection ? activeSection.file.path : undefined;
 
-        if (hasRendered && activeFilePath === renderedFilePath) {
-            updateToday?.();
+        if (hasRendered && activeFilePath === renderedFilePath)
             return;
-        }
         hasRendered = true;
         renderedFilePath = activeFilePath;
         updateToday = null;
@@ -189,11 +260,15 @@ export async function displayStatus(tracker: Tracker, element: HTMLElement, getS
         // time is added live below, the same way the default view's timers work.
         const todayStart = moment().startOf("day").unix();
         const todayEnd = moment().endOf("day").unix();
-        const allToday = await allTracks(app, todayStart, todayEnd);
+        // From the sections already fetched above - not another allTracks(app, ...)
+        // call, which would scan the whole vault a second time on every transition.
+        const allToday = allTracksFromSections(sections, todayStart, todayEnd);
         const loggedSecondsToday = daySumSeconds(undefined, moment(), allToday);
 
         let td1 = row1.createEl("td");
-        row1.createEl("td").createEl("span", { text: "Active timer in note " + activeSection.file.path });
+        let msgCell = row1.createEl("td");
+        msgCell.createSpan({ text: "Active timer in note " });
+        createNoteLink(msgCell, activeSection.file.path, activeSection.file, app);
 
         let td2 = row1.createEl("td");
         let timer = td2.createDiv({ cls: "time-tracker-timers" });
@@ -202,9 +277,15 @@ export async function displayStatus(tracker: Tracker, element: HTMLElement, getS
         todayDiv.createEl("span", { text: "Today" });
 
         updateToday = () => {
-            const runningStart = Math.max(runningEntry.startTime, todayStart);
-            const now = Math.min(moment().unix(), todayEnd);
-            const liveSeconds = Math.max(0, now - runningStart);
+            const runningStartMs = Math.max(runningEntry.startTime, todayStart) * 1000;
+            // Millisecond precision throughout, rounded to the nearest second
+            // only at the very end - not moment().unix()'s floor - so that
+            // sampling still reliably lands on the correct value even with a
+            // few hundred ms of ordinary JS timer jitter, instead of needing
+            // to land exactly on the true second boundary to avoid visibly
+            // skipping one.
+            const nowMs = Math.min(Date.now(), todayEnd * 1000);
+            const liveSeconds = Math.max(0, Math.round((nowMs - runningStartMs) / 1000));
             todayTime.setText(formatDuration((loggedSecondsToday + liveSeconds) * 1000));
         };
 
@@ -222,33 +303,140 @@ export async function displayStatus(tracker: Tracker, element: HTMLElement, getS
     }
 
     await refresh();
-    onTick(element, refresh);
+
+    // Ticks the live "Today" number every second using already-known state -
+    // no vault scan, just moment() math - while the running/not-running check
+    // itself is event-driven, not polled: it only costs a readAll() when a
+    // note actually changes (Start/Stop/Edit, from anywhere), instead of once
+    // a second regardless of whether anything happened. Debounced so a burst
+    // of saves elsewhere in the vault collapses into one scan rather than
+    // several overlapping ones competing with the tick above for the main
+    // thread (a likely source of the "Today" number occasionally skipping a
+    // visible second).
+    const triggerRefresh = debounced(refresh, 300);
+    const eventRef = app.vault.on("modify", () => triggerRefresh());
+    // tbl, not element - see displayTrackerDefault's onTick call for why.
+    onTick(tbl, () => updateToday?.(), { intervalMs: settings.statusUpdateSeconds * 1000, onDisconnect: () => app.vault.offref(eventRef) });
 }
 
 export async function displayToday(tracker: Tracker, element: HTMLElement, getSectionInfo: () => MarkdownSectionInformation, settings: TimeTrackerSettings, app: App): Promise<void> {
-    const format = settings.timestampFormat;
-
-    let startTime = moment().startOf("day").unix(); // First second of today
-    let endTime = moment().endOf("day").unix(); // Last second of today
-    let all = await allTracks(app, startTime, endTime);
-    let proj = findProjects(all);
-
     let tbl = element.createEl("table", { cls: "time-tracker-table" });
-    tbl.createEl("tr").append(
-        createEl("th", { text: "Project" }),
-        createEl("th", { text: "Duration (hours)" }));
 
-    let sum = 0;
-    for (let project of proj) {
-        let ds = daySum(project, moment(), all);
-        sum += parseFloat(ds);
-        let row = tbl.createEl("tr");
-        row.createEl("td", { text: project });
-        row.createEl("td", { text: ds });
+    // Event-driven, same pattern as displayStatus: rebuilds the table only on
+    // an actual running/not-running (or active-file) transition, triggered by
+    // a vault change rather than polled; the live numbers tick separately
+    // below (every 30s - precision here matters less than in displayStatus),
+    // so a running timer's elapsed-today time is still reflected without
+    // waiting for it to be stopped.
+    let hasRendered = false;
+    let renderedFilePath: string = undefined;
+    let updateLive: (() => void) | null = null;
+
+    async function refresh(): Promise<void> {
+        const sections = await readAll(app);
+        const activeSection = sections.find(s => isRunning(s.tracker));
+        const activeFilePath = activeSection ? activeSection.file.path : undefined;
+
+        if (hasRendered && activeFilePath === renderedFilePath)
+            return;
+        hasRendered = true;
+        renderedFilePath = activeFilePath;
+        updateLive = null;
+        tbl.empty();
+
+        const todayStart = moment().startOf("day").unix();
+        const todayEnd = moment().endOf("day").unix();
+        // From the sections already fetched above - see displayStatus for why.
+        const all = allTracksFromSections(sections, todayStart, todayEnd);
+
+        const activeProject = activeSection
+            ? toName(activeSection.tracker.project, activeSection.tracker.client)
+            : undefined;
+        const runningEntry = activeSection ? getRunningEntry(activeSection.tracker.entries) : undefined;
+
+        // include the running entry's project even if it has no completed
+        // entries logged today yet, so its live time still gets a row
+        let proj = findProjects(all);
+        if (activeProject && !proj.includes(activeProject))
+            proj = [...proj, activeProject].sort();
+
+        // Pick which note to link each project's row to: the section list is
+        // already in hand from readAll above, so this is free - no extra scan.
+        const projectFiles = pickProjectFiles(sections);
+
+        tbl.createEl("tr").append(
+            createEl("th", { text: "Project" }),
+            createEl("th", { text: "Duration (hours)" }));
+
+        // activeCell holds only the numeric value, as its own span, so the
+        // "active" marker next to it survives updateLive()'s per-tick
+        // setText() calls instead of being wiped out along with it.
+        let activeCell: HTMLElement = null;
+        let staticTotalSeconds = 0;
+        let activeBaseSeconds = 0;
+
+        for (let project of proj) {
+            const loggedSeconds = daySumSeconds(project, moment(), all);
+            staticTotalSeconds += loggedSeconds;
+
+            let row = tbl.createEl("tr");
+            let nameCell = row.createEl("td");
+            const file = projectFiles.get(project);
+            if (file)
+                createNoteLink(nameCell, project, file, app);
+            else
+                nameCell.setText(project);
+            let cell = row.createEl("td");
+            let valueSpan = cell.createSpan({ text: (loggedSeconds / 3600).toFixed(2) });
+            if (project === activeProject) {
+                activeCell = valueSpan;
+                activeBaseSeconds = loggedSeconds;
+                cell.createSpan({ text: "active", cls: "time-tracker-active-marker" });
+            }
+        }
+
+        let totalRow = tbl.createEl("tr");
+        totalRow.createEl("td", { text: "Total:" });
+        let totalCell = totalRow.createEl("td", { text: (staticTotalSeconds / 3600).toFixed(2) });
+
+        if (runningEntry) {
+            updateLive = () => {
+                const runningStartMs = Math.max(runningEntry.startTime, todayStart) * 1000;
+                // See displayStatus's updateToday for why round(ms) rather
+                // than moment().unix()'s floor.
+                const nowMs = Math.min(Date.now(), todayEnd * 1000);
+                const liveSeconds = Math.max(0, Math.round((nowMs - runningStartMs) / 1000));
+                if (activeCell)
+                    activeCell.setText(((activeBaseSeconds + liveSeconds) / 3600).toFixed(2));
+                totalCell.setText(((staticTotalSeconds + liveSeconds) / 3600).toFixed(2));
+            };
+            updateLive();
+        }
     }
-    let row = tbl.createEl("tr");
-    row.createEl("td", { text: "Total:" });
-    row.createEl("td", { text: sum.toFixed(2) });
+
+    await refresh();
+
+    // Same split as displayStatus: a cheap local tick keeps the live numbers
+    // moving (every 30s here - this widget doesn't need per-second precision),
+    // while the vault-wide running/not-running check is event-driven, only
+    // costing a readAll() when a note actually changes - debounced for the
+    // same reason as displayStatus (see there).
+    const triggerRefresh = debounced(refresh, 300);
+    const eventRef = app.vault.on("modify", () => triggerRefresh());
+    // tbl, not element - see displayTrackerDefault's onTick call for why.
+    onTick(tbl, () => updateLive?.(), { intervalMs: settings.todayUpdateSeconds * 1000, onDisconnect: () => app.vault.offref(eventRef) });
+}
+
+// A clickable link to one of the vault's notes, styled/behaving like a
+// normal internal link (including working with Obsidian's Page Preview
+// hover, since that keys off the "internal-link" class + href).
+function createNoteLink(parent: HTMLElement, text: string, file: TFile, app: App): HTMLElement {
+    const link = parent.createEl("a", { text, cls: "internal-link", href: file.path });
+    link.addEventListener("click", (evt: MouseEvent) => {
+        evt.preventDefault();
+        app.workspace.getLeaf(evt.ctrlKey || evt.metaKey).openFile(file);
+    });
+    return link;
 }
 
 function setCountdownValues(tracker: Tracker, current: HTMLElement, total: HTMLElement, currentDiv: HTMLDivElement): void {
