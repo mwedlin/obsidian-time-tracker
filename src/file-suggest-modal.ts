@@ -1,4 +1,4 @@
-import { App, FuzzySuggestModal, TFile, TFolder } from "obsidian";
+import { App, FuzzySuggestModal, TAbstractFile, TFile, TFolder } from "obsidian";
 
 // A fuzzy-searchable file picker over an explicit list of candidates - used
 // both by the Templater path settings (browsing the whole vault) and, when a
@@ -27,6 +27,38 @@ export class FileSuggestModal extends FuzzySuggestModal<TFile> {
 
     onChooseItem(file: TFile): void {
         this.onChoose(file);
+    }
+}
+
+// A fuzzy-searchable picker over a mix of files and folders - used by the
+// Templater path settings' "Browse" button, since a path setting can be
+// pointed at either a single template file or a folder of them (see
+// pickFile below and design.md's Templater integration section).
+export class PathSuggestModal extends FuzzySuggestModal<TAbstractFile> {
+
+    private items: TAbstractFile[];
+    private onChoose: (item: TAbstractFile) => void;
+
+    constructor(app: App, items: TAbstractFile[], onChoose: (item: TAbstractFile) => void) {
+        super(app);
+        this.items = items;
+        this.onChoose = onChoose;
+        this.setPlaceholder("Type to search for a template file or folder...");
+        this.emptyStateText = "No matching files or folders found.";
+    }
+
+    getItems(): TAbstractFile[] {
+        return this.items;
+    }
+
+    getItemText(item: TAbstractFile): string {
+        // A trailing "/" marks a folder in the list, distinguishing it from
+        // a same-named file at a glance.
+        return item instanceof TFolder ? `${item.path}/` : item.path;
+    }
+
+    onChooseItem(item: TAbstractFile): void {
+        this.onChoose(item);
     }
 }
 

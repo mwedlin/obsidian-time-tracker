@@ -4,7 +4,7 @@ import { Entry } from "./types";
 import { readAll, FileSection, stopAll, writeTrackerSection } from "./files";
 import { isRunning, latestEntryTime, startNewEntry, getRunningEntry } from "./model";
 import { isWithin, toName, createMarkdownTable, buildReportData } from "./report-logic";
-import { parseDate } from "./dateutil";
+import { parseDate, getNldatesPlugin } from "./dateutil";
 import { renderTemplaterFile } from "./templater";
 import { getMarkdownFilesInFolder, pickFile } from "./file-suggest-modal";
 import type { InternalApi } from "./api";
@@ -129,6 +129,18 @@ function hasRunningTimerWithin(sections: FileSection[], start: number, end: numb
     });
 }
 
+// The Report dialog's From/To fields are a calendar date range, not
+// timestamps - createMarkdownTable/buildReportData only ever call
+// .startOf("day")/.endOf("day") on them, discarding any time-of-day
+// component entirely. Parsing and displaying them against the user's
+// Timestamp Display Format setting (used elsewhere for actual task
+// start/end timestamps, e.g. "YY-MM-DD hh:mm:ss") needlessly required
+// typing and looking at a time-of-day that's thrown away regardless - a
+// plain ISO date is both easier to type by hand (no need for Natural
+// Language Dates just to get a valid date in) and a better match for what
+// this dialog actually does with the input.
+const REPORT_DATE_FORMAT = "YYYY-MM-DD";
+
 // Report modal: lets the user pick a date range and appends a markdown table
 // of hours-per-project-per-day at the cursor.
 export class ReportModal extends Modal {
@@ -153,7 +165,7 @@ export class ReportModal extends Modal {
         let newStartDiv = td1.createEl("div", { cls: "time-tracker-txt" });
         let newStart = newStartDiv.createEl("span", { cls: "time-tracker-txt" });
         let newStartNameBox = new TextComponent(newStart)
-            .setPlaceholder("From time");
+            .setPlaceholder("From date (YYYY-MM-DD)");
         newStartDiv.createEl("span", { text: "From" });
 
         // End time
@@ -161,7 +173,7 @@ export class ReportModal extends Modal {
         let newEndDiv = td2.createEl("div", { cls: "time-tracker-txt" });
         let newEnd = newEndDiv.createEl("span", { cls: "time-tracker-txt" });
         let newEndNameBox = new TextComponent(newEnd)
-            .setPlaceholder("To time");
+            .setPlaceholder("To date (YYYY-MM-DD)");
         newEndDiv.createEl("span", { text: "To" });
 
         // add Calculate buttons
@@ -170,42 +182,55 @@ export class ReportModal extends Modal {
         new ButtonComponent(buttons)
             .setButtonText("Check dates")
             .onClick(() => {
-                const format = this.settings.timestampFormat;
+                const format = REPORT_DATE_FORMAT;
 
                 let startDate = parseDate(this.app, newStartNameBox.getValue(), format);
                 let endDate = parseDate(this.app, newEndNameBox.getValue(), format);
                 if (startDate.isValid())
                     newStartNameBox.setValue(startDate.format(format));
+                else if (newStartNameBox.getValue())
+                    new Notice(this.dateParseFailureMessage("From", format));
                 if (endDate.isValid())
                     newEndNameBox.setValue(endDate.format(format));
+                else if (newEndNameBox.getValue())
+                    new Notice(this.dateParseFailureMessage("To", format));
                 updateWarning();
             });
 
         new ButtonComponent(buttons)
             .setButtonText("Append table at cursor")
             .onClick(async () => {
-                const format = this.settings.timestampFormat;
+                const format = REPORT_DATE_FORMAT;
 
                 let startDate = parseDate(this.app, newStartNameBox.getValue(), format);
                 let endDate = parseDate(this.app, newEndNameBox.getValue(), format);
-                if (startDate.isValid() && endDate.isValid()) {
-                    let startTime = startDate.startOf("day").unix(); // First second of date
-                    let endTime = endDate.endOf("day").unix(); // Last second of date
-                    // Closed before resolving the template (rather than
-                    // after): if the configured template path is a folder,
-                    // buildReportText opens its own file-picker modal, which
-                    // would otherwise stack on top of this still-open dialog
-                    // and, once dismissed, make it look like this dialog
-                    // "reappeared" instead of having already done its job.
-                    this.close();
-                    let all = await allTracks(this.app, startTime, endTime);
-                    const text = await this.buildReportText(startTime, endTime, all);
-                    if (text === null) {
-                        new Notice("Time Tracker: report cancelled.");
-                        return;
-                    }
-                    this.onSubmit(text);
+                if (!startDate.isValid() || !endDate.isValid()) {
+                    // Previously a silent no-op here - indistinguishable from
+                    // the button doing nothing at all, which is exactly what
+                    // it looked like when reported as a bug. Both "Check
+                    // dates" and this button share the same strict-format
+                    // parsing, so the same explanation applies to either.
+                    const badField = !startDate.isValid() ? "From" : "To";
+                    new Notice(this.dateParseFailureMessage(badField, format));
+                    return;
                 }
+
+                let startTime = startDate.startOf("day").unix(); // First second of date
+                let endTime = endDate.endOf("day").unix(); // Last second of date
+                // Closed before resolving the template (rather than after):
+                // if the configured template path is a folder,
+                // buildReportText opens its own file-picker modal, which
+                // would otherwise stack on top of this still-open dialog
+                // and, once dismissed, make it look like this dialog
+                // "reappeared" instead of having already done its job.
+                this.close();
+                let all = await allTracks(this.app, startTime, endTime);
+                const text = await this.buildReportText(startTime, endTime, all);
+                if (text === null) {
+                    new Notice("Time Tracker: report cancelled.");
+                    return;
+                }
+                this.onSubmit(text);
             });
 
         // Non-blocking heads-up rather than forcing a stop-or-continue choice:
@@ -220,7 +245,7 @@ export class ReportModal extends Modal {
         let warningEl: HTMLElement | null = null;
 
         const updateWarning = () => {
-            const format = this.settings.timestampFormat;
+            const format = REPORT_DATE_FORMAT;
             const startDate = parseDate(this.app, newStartNameBox.getValue(), format);
             const endDate = parseDate(this.app, newEndNameBox.getValue(), format);
             const show = startDate.isValid() && endDate.isValid()
@@ -244,6 +269,19 @@ export class ReportModal extends Modal {
 
     onClose(): void {
         this.contentEl.empty();
+    }
+
+    // Explains why a date field failed to parse - the format string alone
+    // ("YY-MM-DD hh:mm:ss" by default) isn't obviously readable to everyone,
+    // and parsing is strict (see parseDate), so anything not matching it
+    // exactly fails with no partial credit. Mentions the Natural Language
+    // Dates plugin specifically when neither it nor its "Revived" fork is
+    // installed (see dateutil.ts's getNldatesPlugin), since installing
+    // either is the usual way around needing to match the strict format.
+    private dateParseFailureMessage(field: "From" | "To", format: string): string {
+        const nldatesInstalled = !!getNldatesPlugin(this.app);
+        const hint = nldatesInstalled ? "" : ` (or install "Natural Language Dates" for relaxed input like "yesterday")`;
+        return `Time Tracker: couldn't parse the "${field}" date - expected the format "${format}"${hint}.`;
     }
 
     // Uses the configured Templater template if set, stashing the computed

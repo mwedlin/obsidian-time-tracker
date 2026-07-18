@@ -19,11 +19,11 @@ unit-tested under plain Node (`tests/`, see improvement #4 below):
 | `model.ts` | no | tracker state machine (start/stop/split/remove), duration/timestamp formatting, `flattenEntries`, CSV/table row building |
 | `report-logic.ts` | no | pure report math: `toName`, `isWithin`, `findProjects`, `findDays`, `daySumSeconds`/`daySum`, `buildReportData`, `createMarkdownTable` |
 | `zip-path-safety.ts` | no | `sanitizeRelativePath` — zip-slip-safe path validation for the template kit installer |
-| `dateutil.ts` | yes (`App` type only) | `parseDate` — strict format, falls back to the nldates-obsidian plugin |
+| `dateutil.ts` | yes (`App` type only) | `parseDate` — strict format, falls back to a Natural Language Dates plugin (original or "Revived" fork) |
 | `templater.ts` | yes (`App` type only) | `renderTemplaterFile` — soft dependency on the Templater community plugin |
 | `api.ts` | yes (`App` type only) | this plugin's public API (`app.plugins.plugins["time-tracker"].api`) + the internal "stash and consume" state behind it |
 | `confirm-modal.ts` | yes | reusable "are you sure?" dialog |
-| `file-suggest-modal.ts` | yes | fuzzy file picker, used by the Templater path settings and the kit installer |
+| `file-suggest-modal.ts` | yes | fuzzy file picker (`pickFile`) and combined file/folder picker (`PathSuggestModal`), used by the Templater path settings and the kit installer |
 | `folder-suggest-modal.ts` | yes | fuzzy folder picker, used by the kit installer |
 | `template-kit-installer.ts` | yes | `InstallTemplateKitModal` — installs a `.zip` of Templater templates into a chosen vault folder |
 | `ticker.ts` | yes (DOM) | single shared 1s interval for all rendered trackers |
@@ -325,6 +325,21 @@ caller via an `onSubmit` callback (`main.ts` wires that callback to `editor.repl
 `buildReportText`, which uses a configured Templater template instead of `createMarkdownTable` when
 `settings.reportTemplatePath` is set (see below).
 
+These two fields are parsed and displayed against a fixed `REPORT_DATE_FORMAT` (`"YYYY-MM-DD"`), not
+`settings.timestampFormat` - deliberately decoupled from that setting, since this dialog only ever works
+with whole calendar days (`startOf("day")`/`endOf("day")`, discarding any time-of-day component
+regardless of what's typed). Originally it reused `timestampFormat`, which defaults to
+`"YY-MM-DD hh:mm:ss"` - correct for actual task timestamps elsewhere, but a needlessly awkward format to
+type by hand here (a 2-digit year plus a full time-of-day that gets thrown away immediately), and a user
+without a Natural Language Dates plugin installed had no easier way in. Switching to a plain ISO date
+fixes both: `"Check dates"` now echoes back a clean date instead of a full timestamp, and strict parsing
+alone is easy to satisfy without Natural Language Dates being a hard requirement - which was floated as an
+option (`make it mandatory?`) but rejected: hard-depending on a third-party plugin for core functionality
+is a real risk, not a hypothetical one, given the original Natural Language Dates plugin had *just* gone
+missing from Obsidian's community directory in favor of an unrelated-id fork (see the date-parsing bug
+entry above) - the right fix was making the strict path good enough on its own, not leaning on the soft
+dependency harder.
+
 ### Timezone
 
 Timestamps are stored as raw Unix seconds (timezone-agnostic), but every place that turns one into a
@@ -371,12 +386,19 @@ attribute the same instant to different calendar days depending on which device 
 ## Date parsing (`parseDate` in `src/dateutil.ts`)
 
 Tries a strict `moment(dt, format, true)` parse first, using the user-configured timestamp format
-(Settings → "Timestamp Display Format"). If that fails, it falls back to the **Natural Language Dates**
-community plugin (`nldates-obsidian`, via its `parseDate(text, ref, option)` API) to interpret relaxed
-input like "next monday" — so that plugin is an optional soft dependency, not a hard one; if it isn't
-installed, relaxed parsing just won't work. `parseDate` now takes `app` as an explicit parameter rather
-than reading `this.app` from a non-method context (that was one of the bugs in `problems.md`); the old
-`src/dateparser.ts` experiment along the same lines has been removed as dead code.
+(Settings → "Timestamp Display Format"). If that fails, it falls back to a **Natural Language Dates**
+plugin, via its `parseDate(text)` API, to interpret relaxed input like "next monday" — so that plugin is
+an optional soft dependency, not a hard one; if neither variant is installed, relaxed parsing just won't
+work (and the caller gets a `Notice` instead of a silent no-op - see the bug writeup below).
+`getNldatesPlugin` (also in `dateutil.ts`) checks two plugin ids, not one: the original
+(`argenos/nldates-obsidian`, id `nldates-obsidian`) appears to have gone unmaintained, and Obsidian's
+community plugin directory now also lists an actively maintained fork, "Natural Language Dates (Revived)"
+(`Amato21/nldates-revived`, id `nldates-revived`) - a genuinely different plugin id, not just a renamed
+listing of the same one, confirmed against the fork's own `manifest.json`. Both expose the same
+`parseDate(text): { moment }` shape (confirmed against the fork's own published `API.md`), so no other
+code needed to change once the id-lookup covered both. `parseDate` takes `app` as an explicit parameter
+rather than reading `this.app` from a non-method context (that was one of the bugs in `problems.md`); the
+old `src/dateparser.ts` experiment along the same lines has been removed as dead code.
 
 ## Commands (`src/main.ts`)
 
@@ -424,14 +446,18 @@ surfaces a `Notice` instead of guessing.
   "Copy as table" button, and its "Copy as CSV" button respectively. Unlike the settings above, an empty
   value here is the valid, expected default (keep the built-in hardcoded format) — the settings tab
   doesn't fall back to anything else on empty input. Each has a "Browse" button next to its text field
-  that opens `FileSuggestModal` (`src/file-suggest-modal.ts`, a `FuzzySuggestModal<TFile>` over
-  `app.vault.getMarkdownFiles()`) so the path doesn't have to be typed by hand - this browse button only
-  picks a single file; typing a folder path directly is how you opt into the per-use picker described
-  below. See "Templater integration" below.
+  that opens `PathSuggestModal` (`src/file-suggest-modal.ts`, a `FuzzySuggestModal<TAbstractFile>` over
+  `app.vault.getMarkdownFiles()` combined with `getAllFolders(app)` from `folder-suggest-modal.ts`, a
+  trailing "/" marking folders in the list) - so this one browse button can pick either a single template
+  file or a folder of them, matching what the setting itself accepts. The vault root is filtered out of
+  the folder list here specifically: its path is `""`, which this setting already treats as "no template
+  set," and "scan the entire vault for templates" isn't a sensible default folder choice anyway (typing a
+  path manually is still unrestricted, if someone really wants that). See "Templater integration" below.
 
 ## External/optional integrations
 
-- **nldates-obsidian** — optional, enables relaxed natural-language date parsing in `parseDate`.
+- **Natural Language Dates** (`nldates-obsidian`) or its **"Revived" fork** (`nldates-revived`) — optional,
+  either enables relaxed natural-language date parsing in `parseDate`; see `getNldatesPlugin`.
 - **Templater** — optional, lets a user replace this plugin's hardcoded output formats with their own
   template. See "Templater integration" below.
 - **buttons** (community plugin) — not called by this plugin's code at all; `test-vault/Tidsredovisning.md`
@@ -532,6 +558,25 @@ data in a paste) is easy to notice and redo.
    completed. Fixed by closing `ReportModal` *before* resolving the template, not after - the same restructure
    also means a cancelled folder-picker now surfaces a `Notice` ("report cancelled") instead of trying to
    silently leave an already-closed dialog "open".
+
+**Bug found via testing in a second vault: both Report dialog buttons appeared to do nothing, with no
+console error.** Root cause turned out to be unrelated to Templater (despite the report mentioning it was
+installed): `parseDate` parses *strictly* against `settings.timestampFormat` (`"YY-MM-DD hh:mm:ss"` by
+default), falling back to the "Natural Language Dates" plugin only if it's installed. In a fresh vault
+without that plugin, typing a date in any format other than the exact configured one - a very easy thing
+to do, since that default format isn't obviously guessable - left both `startDate`/`endDate` invalid, and
+both button handlers silently no-op on an invalid date with zero feedback: "Check dates" skips reformatting
+the box it couldn't parse (so it visibly does nothing), and "Append table at cursor" skips its entire body
+(so it also visibly does nothing) - indistinguishable from the buttons being broken, since nothing throws.
+Fixed by adding a `Notice` (`dateParseFailureMessage`) whenever a non-empty date field fails to parse,
+naming the expected format and suggesting Natural Language Dates specifically when it isn't installed -
+in both places this could happen, not just one. Following up on this, the user reported the plugin had
+actually gone missing from Obsidian's community plugin browser and reappeared as "Natural Language Dates
+(Revived)" - which turned out to be a genuinely different plugin id (`nldates-revived`), not a renamed
+listing of the original (`nldates-obsidian`), confirmed against the fork's own `manifest.json`. Before this
+fix, `getPlugin("nldates-obsidian")` simply wouldn't find it, silently disabling relaxed parsing (and this
+same `Notice`'s "install Natural Language Dates" hint) for anyone who'd installed the fork instead of the
+original. See "Date parsing" above for the fix (`getNldatesPlugin` now checks both ids).
 
 Starting-point example templates live in `test-vault/templates/` — kept inside the test vault (rather
 than at the repo root) so they can be pointed at directly while testing against the Templater plugin

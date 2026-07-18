@@ -1,9 +1,10 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, PluginSettingTab, Setting, TAbstractFile } from "obsidian";
 import TimeTrackerPlugin from "./main";
 import { defaultSettings, TimeTrackerSettings } from "./settings";
 import { favoriteCommandName } from "./favorites";
 import { toName } from "./report-logic";
-import { FileSuggestModal } from "./file-suggest-modal";
+import { PathSuggestModal } from "./file-suggest-modal";
+import { getAllFolders } from "./folder-suggest-modal";
 
 type UpdateIntervalKey = keyof Pick<TimeTrackerSettings, "timerUpdateSeconds" | "statusUpdateSeconds" | "todayUpdateSeconds">;
 type TemplatePathKey = keyof Pick<TimeTrackerSettings, "reportTemplatePath" | "trackerTableTemplatePath" | "trackerCsvTemplatePath">;
@@ -160,9 +161,14 @@ export class TimeTrackerSettingsTab extends PluginSettingTab {
 
     // Unlike addUpdateIntervalSetting above, an empty value here is valid and
     // expected (it means "use the built-in format") - not replaced with a
-    // fallback default. The "Browse" button opens a fuzzy file picker
-    // (FileSuggestModal) so the user doesn't have to type/remember an exact
-    // vault-relative path by hand.
+    // fallback default. The "Browse" button opens a fuzzy picker over both
+    // files and folders (PathSuggestModal) so the user doesn't have to
+    // type/remember an exact vault-relative path by hand - a folder is a
+    // valid choice here too, letting the setting point at a folder of
+    // templates to choose between each time (see design.md). The vault root
+    // itself is left out of the folder list: picking "the whole vault" as a
+    // template-scanning folder isn't a sensible default, and its path is the
+    // empty string, which this setting already treats as "no template set".
     private addTemplatePathSetting(name: string, desc: string, key: TemplatePathKey): void {
         new Setting(this.containerEl)
             .setName(name)
@@ -177,10 +183,14 @@ export class TimeTrackerSettingsTab extends PluginSettingTab {
             })
             .addButton(b => b
                 .setIcon("lucide-search")
-                .setTooltip("Browse for a template file")
+                .setTooltip("Browse for a template file or folder")
                 .onClick(() => {
-                    new FileSuggestModal(this.app, this.app.vault.getMarkdownFiles(), async file => {
-                        this.plugin.settings[key] = file.path;
+                    const items: TAbstractFile[] = [
+                        ...this.app.vault.getMarkdownFiles(),
+                        ...getAllFolders(this.app).filter(f => f.path !== ""),
+                    ];
+                    new PathSuggestModal(this.app, items, async item => {
+                        this.plugin.settings[key] = item.path;
                         await this.plugin.saveSettings();
                         this.display();
                     }).open();
